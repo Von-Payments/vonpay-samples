@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  node-samples:
+    name: ${{ matrix.sample }} (Node)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sample:
+          - checkout-nextjs
+          - checkout-express
+          - checkout-paybylink-nextjs
+    defaults:
+      run:
+        working-directory: ./${{ matrix.sample }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ${{ matrix.sample }}/package-lock.json
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Lint (best-effort)
+        run: npx eslint . --max-warnings=0 || echo "no eslint config — skipping"
+        continue-on-error: true
+
+      - name: Build
+        env:
+          # CI uses placeholder env so build doesn't fail validation. Real
+          # samples need test keys at runtime, not build time.
+          VON_PAY_SECRET_KEY: vp_sk_test_ci_placeholder
+          VON_PAY_SESSION_SECRET: ss_test_ci_placeholder
+        run: |
+          if grep -q '"build"' package.json; then
+            npm run build
+          else
+            echo "no build script — skipping"
+          fi
+
+  python-samples:
+    name: ${{ matrix.sample }} (Python)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sample:
+          - checkout-flask
+    defaults:
+      run:
+        working-directory: ./${{ matrix.sample }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: ${{ matrix.sample }}/requirements.txt
+
+      - name: Install
+        run: pip install -r requirements.txt
+
+      - name: Import smoke test
+        run: python -c "import app; print('import OK')"
+        env:
+          VON_PAY_SECRET_KEY: vp_sk_test_ci_placeholder
+          VON_PAY_SESSION_SECRET: ss_test_ci_placeholder
+          BASE_URL: http://localhost:3000

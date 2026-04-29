@@ -1,0 +1,27 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "labels": ["dependencies"],
+  "schedule": ["before 4am on monday"],
+  "packageRules": [
+    {
+      "description": "Group all @vonpay/* SDK bumps into one PR per Sortie",
+      "matchPackagePatterns": ["^@vonpay/"],
+      "groupName": "vonpay sdks",
+      "schedule": ["at any time"],
+      "automerge": false,
+      "labels": ["vonpay-sdk", "high-priority"]
+    },
+    {
+      "description": "Group vonpay-checkout (Python) bumps with the npm SDKs",
+      "matchPackageNames": ["vonpay-checkout"],
+      "groupName": "vonpay sdks",
+      "schedule": ["at any time"],
+      "automerge": false,
+      "labels": ["vonpay-sdk", "high-priority"]
+    }
+  ],
+  "rangeStrategy": "bump",
+  "rebaseWhen": "conflicted",
+  "prConcurrentLimit": 5
+}
