@@ -4,7 +4,7 @@ Multi-tenant reference integration for platforms (CRMs, subscription engines, IS
 
 - **Stack:** Next.js 15 / React 19 / TypeScript strict
 - **SDK:** [`@vonpay/checkout-node@^0.4.0`](https://www.npmjs.com/package/@vonpay/checkout-node)
-- **Best for:** Konnektive / Sticky.io / Recharge / Northbeam / Shogun-shaped platforms — anywhere your product has many "merchants" and each wants to plug Von Payments in as their gateway
+- **Best for:** subscription-billing CRMs, headless commerce platforms, ISV cart products, marketplace operators — anywhere your product has many "merchants" and each wants to plug Von Payments in as their gateway
 
 ## What it demonstrates
 

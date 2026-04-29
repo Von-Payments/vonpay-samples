@@ -70,7 +70,7 @@ Webhooks carry an `X-VonPay-Signature` HMAC header. `vonpay.webhooks.constructEv
 
 ## Who this sample is for
 
-A merchant or developer integrating Von Payments into a single-product checkout (Shopify-style cart → redirect). If you're instead building a **platform/CRM connector** that needs to integrate Vora alongside Stripe / NMI / Authorize.Net inside someone else's product (Sticky.io, Konnektive, Limelight, NextCRM, ISV cart platforms), start at the [Platforms integration spec](https://docs.vonpay.com/platforms) and the [Platform Integrator Sandbox guide](https://docs.vonpay.com/guides/platform-sandbox) — the API surface and sandbox provisioning are the same as this sample exercises, but the deployment shape is different.
+A merchant or developer integrating Von Payments into a single-product checkout (cart → redirect pattern). If you're instead building a **platform/CRM connector** that needs to integrate Vora alongside other gateways inside someone else's product (subscription-billing CRMs, ISV cart platforms, headless commerce platforms), start at the [Platforms integration spec](https://docs.vonpay.com/platforms) and the [Platform Integrator Sandbox guide](https://docs.vonpay.com/guides/platform-sandbox) — the API surface and sandbox provisioning are the same as this sample exercises, but the deployment shape is different.
 
 ## Related
 
