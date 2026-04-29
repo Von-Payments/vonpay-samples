@@ -17,6 +17,7 @@ jobs:
           - checkout-nextjs
           - checkout-express
           - checkout-paybylink-nextjs
+          - platform-integrator-nextjs
     defaults:
       run:
         working-directory: ./${{ matrix.sample }}
