@@ -24,13 +24,17 @@ Each sample demonstrates the full checkout lifecycle:
 
 ### 1. Get sandbox keys
 
-Sign up at [app.vonpay.com](https://app.vonpay.com) (OTP login, no approval queue for sandbox). From the dashboard, click **Activate Vora Sandbox** at `/dashboard/developers` — you'll have three keys instantly:
+Start at [vonpay.com/developers](https://vonpay.com/developers) — the developer-first landing page. The **Get sandbox keys** button deep-links straight into the developer dashboard, where one click on **Activate Vora Sandbox** mints all three keys instantly:
 
 - `vp_sk_test_...` — secret API key (server-only, never ship to client)
 - `vp_pk_test_...` — publishable key
 - `ss_test_...` — session signing secret (verifies return URL signatures)
 
-> **Why no shared demo keys?** Sandbox activation is faster than copying-pasting keys from a README. The dashboard hands you all three in one click and they're tied to your own test merchant — no rate-limiting collisions with other developers.
+OTP sign-in (any email), no merchant application, no ops approval, no shared demo credentials.
+
+> **Already signed in?** Skip the landing page and jump straight to [app.vonpay.com/dashboard/developers](https://app.vonpay.com/dashboard/developers).
+>
+> **Why no shared demo keys?** Sandbox activation is faster than copy-pasting keys from a README. The dashboard hands you all three in one click and they're tied to your own test merchant — no rate-limiting collisions with other developers.
 
 ### 2. Pick a sample, configure, run
 
