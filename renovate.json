@@ -5,7 +5,7 @@
   "schedule": ["before 4am on monday"],
   "packageRules": [
     {
-      "description": "Group all @vonpay/* SDK bumps into one PR per Sortie",
+      "description": "Group all @vonpay/* SDK bumps into one PR per release cycle",
       "matchPackagePatterns": ["^@vonpay/"],
       "groupName": "vonpay sdks",
       "schedule": ["at any time"],
