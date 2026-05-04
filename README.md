@@ -55,22 +55,33 @@ Open `http://localhost:3000`, click pay, complete checkout with a [test card](ht
 - **[docs.vonpay.com/sdks](https://docs.vonpay.com/sdks)** — `@vonpay/checkout-{node,python,cli,mcp}` SDK references
 - **[docs.vonpay.com/reference](https://docs.vonpay.com/reference)** — API surface, webhooks, errors, test cards
 
-## SDKs used
+## Building with AI / agent runtimes
+
+Two surfaces let you skip writing client code entirely and integrate from inside an agent or a terminal:
+
+- **MCP server** — [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp). Drop-in Model Context Protocol server. Add it to Claude Desktop, Cursor, Claude Code, or any MCP-aware runtime, and the agent can create sessions, list test cards, simulate payments, and inspect webhook events directly. See [`docs.vonpay.com/sdks/mcp`](https://docs.vonpay.com/sdks/mcp) for the install snippet.
+- **CLI** — [`@vonpay/checkout-cli`](https://www.npmjs.com/package/@vonpay/checkout-cli). One-command session creation, webhook tail, signature verification. Works equally well for ad-hoc testing and as a tool any agent can shell out to. `npx @vonpay/checkout-cli --help`.
+
+The samples themselves are written to be agent-paste-friendly: short files, explicit env vars, no hidden imports, typed errors. Drop a sample folder into Cursor / Claude Code and ask the agent to extend it — it has everything it needs in-context.
+
+## SDKs
 
 | SDK | Package | Used in |
 |---|---|---|
-| Node.js | [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) | nextjs, express, paybylink-nextjs |
+| Node.js | [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) | nextjs, express, paybylink-nextjs, platform-integrator-nextjs |
 | Python | [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) | flask |
-| CLI | [`@vonpay/checkout-cli`](https://www.npmjs.com/package/@vonpay/checkout-cli) | (not used in samples — install separately for ad-hoc testing) |
-| MCP | [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp) | (agent-runtime integration; see docs/sdks/mcp.md) |
+| CLI | [`@vonpay/checkout-cli`](https://www.npmjs.com/package/@vonpay/checkout-cli) | install separately for ad-hoc testing or agent-tool use |
+| MCP | [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp) | install in an MCP-aware runtime (Claude Desktop, Cursor, etc.) |
 
 Samples pin to exact SDK versions during the pre-1.0 window. Renovate keeps the pins fresh — see [`renovate.json`](./renovate.json).
 
-## What the samples don't cover (today)
+## Roadmap
 
-- **Recurring billing / MIT renewals** — the Checkout product is session-based today; subscriptions API isn't a public surface yet.
-- **Mobile native (iOS / Android)** — no native SDKs published; use the hosted checkout pattern from a webview.
-- **Multi-acquirer routing UI** — routing happens server-side automatically; the public API exposes session outcome, not the routing decision tree. (See [`/vora`](https://vonpay.com/vora) for the routing story; `/orchestration` demo for a visual.)
+Not yet covered by the samples — by design or by product timing:
+
+- **Recurring billing / MIT renewals** — Checkout is session-based today; the subscriptions API isn't a public surface yet. Tracking on the product roadmap.
+- **Mobile native (iOS / Android)** — no native SDKs yet; use the hosted checkout pattern from a webview in the meantime.
+- **Multi-acquirer routing UI** — routing happens server-side automatically; the public API exposes session outcome, not the decision tree. The story is at [vonpay.com/vora](https://vonpay.com/vora); a visual is at [`/demos/vora/orchestration`](https://vonpay.com/demos/vora/orchestration).
 
 When the underlying product surfaces these, samples will land here.
 
@@ -84,7 +95,7 @@ This repo mirrors a private internal monorepo. Bug reports + small fixes welcome
 
 ## Support
 
-- Docs: [docs.vonpay.com](https://docs.vonpay.com)
-- API status: [status.vonpay.com](https://status.vonpay.com) *(if available)*
-- Issues with the SDK or samples: [github.com/Von-Payments/vonpay-samples/issues](https://github.com/Von-Payments/vonpay-samples/issues)
-- Production / underwriting: [vonpay.com/contact](https://vonpay.com/contact)
+- **Docs** — [docs.vonpay.com](https://docs.vonpay.com)
+- **Sample bugs / typos / suggestions** — [open an issue on this repo](https://github.com/Von-Payments/vonpay-samples/issues)
+- **SDK bugs** — file on the package's repo: [`checkout-node`](https://github.com/Von-Payments/checkout-node/issues), [`checkout-python`](https://github.com/Von-Payments/checkout-python/issues), [`checkout-cli`](https://github.com/Von-Payments/checkout-cli/issues), [`checkout-mcp`](https://github.com/Von-Payments/checkout-mcp/issues)
+- **Ready to switch from sandbox to live keys?** — book a 15-minute call at [vonpay.com/contact](https://vonpay.com/contact). Live keys require a quick KYB review; sandbox stays free forever.
