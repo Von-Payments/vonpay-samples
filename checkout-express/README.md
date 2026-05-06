@@ -3,7 +3,7 @@
 Server-only reference integration for the **cart → redirect** pattern using the Node.js SDK on Express. A merchant server creates a session, redirects the buyer to `checkout.vonpay.com`, and verifies both the signed return redirect and the HMAC-signed webhook when the session resolves.
 
 - **Stack:** Node 20+, Express 5, TypeScript strict, ESM
-- **SDK:** [`@vonpay/checkout-node@^0.4.0`](https://www.npmjs.com/package/@vonpay/checkout-node)
+- **SDK:** [`@vonpay/checkout-node@0.5.0`](https://www.npmjs.com/package/@vonpay/checkout-node)
 - **Best for:** headless backends, API-only flows, server-rendered apps with no frontend framework
 
 ## What it demonstrates
@@ -99,4 +99,4 @@ The handler must read the **raw** request body (note the `express.text({ type: "
 
 ## Tested against
 
-`@vonpay/checkout-node@^0.4.0` · last verified 2026-04-28
+`@vonpay/checkout-node@0.5.0` · last verified 2026-05-06

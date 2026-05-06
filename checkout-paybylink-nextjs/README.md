@@ -3,7 +3,7 @@
 Reference integration for the **pay-by-link** pattern: a merchant operator creates a hosted-checkout session from a dashboard form, shares the resulting `checkoutUrl` as a link or QR code, and watches the status update when the webhook arrives. Same `sessions.create()` surface as the cart → redirect flow, different UX: no cart, no per-buyer client code — the merchant is the one creating the session.
 
 - **Stack:** Next.js 15 App Router, React 19, TypeScript strict
-- **Von Payments SDK:** `@vonpay/checkout-node@^0.4.0`
+- **Von Payments SDK:** `@vonpay/checkout-node@0.5.0`
 - **What it demonstrates:** session creation for asynchronous payment, QR-code rendering, webhook-driven status updates, client-side polling of link status, signed return verification (v1 + v2 auto-detect), security headers (CSP / HSTS / X-Frame-Options)
 
 ## 5-minute setup

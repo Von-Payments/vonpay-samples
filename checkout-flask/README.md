@@ -107,4 +107,4 @@ event = checkout.webhooks.construct_event(
 
 ## Tested against
 
-`vonpay-checkout` (latest at time of writing) · last verified 2026-04-28
+`vonpay-checkout==0.5.0` · last verified 2026-05-06

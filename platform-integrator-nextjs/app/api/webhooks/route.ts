@@ -29,20 +29,22 @@ import {
  * step 4 confirms it's authentic. This is safe because parsing JSON
  * doesn't have side effects.
  *
- * (Webhooks v2, when it ships, will include per-subscription `whsec_*`
- * secrets — at that point the secret is keyed by subscription ID
- * rather than per-merchant API key. The lookup pattern stays the same
- * shape.)
+ * (Subscription-level webhooks signed with `whsec_*` per-subscription
+ * secrets are also live — registered at app.vonpay.com/dashboard/
+ * developers/webhooks. That surface uses a different signature header
+ * format and keys the secret by subscription ID rather than per-merchant
+ * API key. See the webhooks-node sample for a receiver covering both.)
  */
 
 // Idempotency: in-memory cache for this process. Replace with Redis or
 // equivalent in production — webhook deliveries can hit multiple
 // instances and you must dedupe across them.
 //
-// The Webhooks v1 payload doesn't carry a top-level event id; we
-// compose one from sessionId + event-type + timestamp, which is
-// unique per delivery. Webhooks v2 (when it ships) will include a
-// dedicated event id; replace this composite at that point.
+// Session-level webhook payloads don't carry a top-level event id; we
+// compose one from sessionId + event-type + timestamp, which is unique
+// per delivery. Subscription-level webhooks (whsec_*-signed) carry a
+// dedicated event id you can use directly — see the webhooks-node
+// sample.
 const seenEventKeys = new Map<string, number>();
 const SEEN_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
