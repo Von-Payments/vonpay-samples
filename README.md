@@ -13,6 +13,9 @@ Official runnable sample integrations for the Von Payments Checkout API. Clone a
 | [`checkout-flask`](./checkout-flask) | Python 3.9+ / Flask | Hosted checkout, server-only | Python services, internal billing, SaaS server-side |
 | [`checkout-paybylink-nextjs`](./checkout-paybylink-nextjs) | Next.js 15 / React 19 | Pay-by-link (operator generates link, customer pays) | Sales / support flows, B2B, invoicing |
 | [`platform-integrator-nextjs`](./platform-integrator-nextjs) | Next.js 15 / React 19 | **Multi-tenant platform** — per-merchant credential lookup, tenant-scoped sessions, multi-tenant webhook routing | Subscription-billing CRMs, headless commerce platforms, ISVs reselling Vora to their merchants |
+| [`payment-intents-node`](./payment-intents-node) | Node 20+ / TypeScript | **Server-side Payment Intents** (auth → capture → refund, idempotency replay) | Delayed-capture flows, fraud-check-before-capture, platform integrators driving the lifecycle from their server |
+| [`payment-intents-python`](./payment-intents-python) | Python 3.11+ | Server-side Payment Intents (Python mirror of `payment-intents-node`) | Same as above, on Python stacks |
+| [`webhooks-node`](./webhooks-node) | Node 20+ / Express 5 / TypeScript | **Webhook receiver** — verify both signature formats, idempotent processing, replay-window enforcement | Any integration that needs to react to async events (`payment_intent.*`, `session.*`, `refund.*`, `dispute.*`) |
 
 Each sample demonstrates the full checkout lifecycle:
 - **Session creation** — server-side, with line items + buyer info
@@ -69,7 +72,7 @@ The samples themselves are written to be agent-paste-friendly: short files, expl
 | SDK | Package | Used in |
 |---|---|---|
 | Node.js | [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) | nextjs, express, paybylink-nextjs, platform-integrator-nextjs |
-| Python | [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) | flask |
+| Python | [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) | flask, payment-intents-python |
 | CLI | [`@vonpay/checkout-cli`](https://www.npmjs.com/package/@vonpay/checkout-cli) | install separately for ad-hoc testing or agent-tool use |
 | MCP | [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp) | install in an MCP-aware runtime (Claude Desktop, Cursor, etc.) |
 
@@ -79,9 +82,11 @@ Samples pin to exact SDK versions during the pre-1.0 window. Renovate keeps the 
 
 Not yet covered by the samples — by design or by product timing:
 
-- **Recurring billing / MIT renewals** — Checkout is session-based today; the subscriptions API isn't a public surface yet. Tracking on the product roadmap.
+- **Embedded card fields (Frame)** — direct in-page card collection without a redirect is in development; ETA Q3-Q4 2026. Until then, use the hosted-redirect samples or pair Payment Intents with a third-party iframe-vault provider (Spreedly).
 - **Mobile native (iOS / Android)** — no native SDKs yet; use the hosted checkout pattern from a webview in the meantime.
 - **Multi-acquirer routing UI** — routing happens server-side automatically; the public API exposes session outcome, not the decision tree. The story is at [vonpay.com/vora](https://vonpay.com/vora); a visual is at [`/demos/vora/orchestration`](https://vonpay.com/demos/vora/orchestration).
+
+> **Already covered:** Recurring billing / saved cards via the `mit` block on Payment Intents — see [`payment-intents-node`](./payment-intents-node) and the [Payment Intents guide](https://docs.vonpay.com/integration/payment-intents#saved-cards--merchant-initiated-mit-charges).
 
 When the underlying product surfaces these, samples will land here.
 
