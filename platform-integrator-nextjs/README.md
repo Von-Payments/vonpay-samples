@@ -3,7 +3,7 @@
 Multi-tenant reference integration for platforms (CRMs, subscription engines, ISVs) that resell Von Payments to their own merchants. Demonstrates the per-tenant credential pattern: each merchant onboarded to the platform has their own Von Payments API key stored on the platform side; the platform looks up the right key at charge time and at webhook time.
 
 - **Stack:** Next.js 15 / React 19 / TypeScript strict
-- **SDK:** [`@vonpay/checkout-node@^0.4.0`](https://www.npmjs.com/package/@vonpay/checkout-node)
+- **SDK:** [`@vonpay/checkout-node@0.5.0`](https://www.npmjs.com/package/@vonpay/checkout-node)
 - **Best for:** subscription-billing CRMs, headless commerce platforms, ISV cart products, marketplace operators — anywhere your product has many "merchants" and each wants to plug Von Payments in as their gateway
 
 ## What it demonstrates
@@ -125,10 +125,10 @@ Webhook deliveries are retried on failure. The receiver must dedupe by `event.id
 
 ## What this sample doesn't cover
 
-- **Webhooks v2 (`whsec_*` per-subscription secrets)** — not yet emitted by any endpoint. The v1 pattern shown here will keep working; v2 will be additive. See [Webhook Verification](https://docs.vonpay.com/integration/webhook-verification) for the full v1 + v2 walkthrough.
+- **Subscription-level webhooks (`whsec_*` per-subscription secrets)** — live alongside the API-key-signed pattern shown in this sample. The pattern here uses session-level webhooks (signed with the merchant's API key); the alternative is the subscription-level surface registered at `app.vonpay.com/dashboard/developers/webhooks` with per-subscription secrets. Both work today. For a sample receiver covering both surfaces, see [`webhooks-node`](../webhooks-node). Spec: [Webhook Verification](https://docs.vonpay.com/integration/webhook-verification).
 - **Per-tenant rate limiting** — your platform should rate-limit charge POSTs per tenant to prevent abuse; not shown here.
 - **Outbound webhooks to your merchants** — your platform may want to forward `session.succeeded` events to the merchant's own webhook URL (their internal CRM, fulfillment system). Not in scope of this sample.
 
 ## Tested against
 
-`@vonpay/checkout-node@^0.4.0` · last verified 2026-04-29
+`@vonpay/checkout-node@0.5.0` · last verified 2026-05-06

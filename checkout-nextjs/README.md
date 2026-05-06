@@ -3,7 +3,7 @@
 End-to-end reference integration for the **cart → redirect** pattern (Shopify-style hosted checkout). A merchant server creates a session, redirects the buyer to `checkout.vonpay.com`, and receives both a signed return redirect and an HMAC-signed webhook when the session resolves.
 
 - **Stack:** Next.js 15 App Router, React 19, TypeScript strict
-- **Von Payments SDK:** `@vonpay/checkout-node@^0.4.0`
+- **Von Payments SDK:** `@vonpay/checkout-node@0.5.0`
 - **What it demonstrates:** session creation, signed return verification (v1 + v2 auto-detect), HMAC webhook verification, security headers (CSP / HSTS / X-Frame-Options)
 
 ## 5-minute setup
