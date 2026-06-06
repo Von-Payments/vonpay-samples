@@ -1,0 +1,85 @@
+# Von Payments — sample apps (llms.txt)
+
+> Machine-readable index for AI agents integrating the Von Payments Checkout API.
+> Runnable, copy-pasteable sample apps live in this repo. Factual only.
+
+## Use these SDK versions (authoritative)
+
+These are the current published versions. Pin to them; do not assume newer.
+
+- @vonpay/checkout-node — 0.9.1 (npm)        # Node / TypeScript server SDK
+- vonpay-checkout — 0.9.1 (PyPI)             # Python server SDK
+- @vonpay/checkout-cli — 0.4.1 (npm)         # CLI for ad-hoc testing / agent tool use
+- @vonpay/checkout-mcp — 0.4.5 (npm)         # MCP server for AI-agent runtimes
+- vora.js — CDN only at https://js.vonpay.com/v1/vora.js   # browser SDK for embedded card fields; NO npm package
+
+Each sample pins its own version. Always read the sample's package.json
+(Node) or requirements.txt (Python) for the exact version it is built against,
+rather than assuming.
+
+## Samples (name → purpose → SDK)
+
+- checkout-nextjs — Hosted checkout (cart → redirect → confirmation), Next.js 15. → @vonpay/checkout-node
+- checkout-express — Hosted checkout, server-only, Express 5. → @vonpay/checkout-node
+- checkout-flask — Hosted checkout, server-only, Flask. → vonpay-checkout (Python)
+- checkout-paybylink-nextjs — Pay-by-link: operator generates a link, customer pays. → @vonpay/checkout-node
+- platform-integrator-nextjs — Multi-tenant platform: per-merchant credential lookup, tenant-scoped sessions, multi-tenant webhook routing. → @vonpay/checkout-node
+- payment-intents-node — Server-side Payment Intents: auth → capture → refund, idempotency replay. → @vonpay/checkout-node
+- payment-intents-python — Python mirror of payment-intents-node. → vonpay-checkout (Python)
+- payment-intents-3ds — 3DS / requires_action handling: branch on status, redirect to issuer challenge, confirm terminal state from webhook. → @vonpay/checkout-node
+- saved-cards-mit — Vault a card off-session, anchor a cardholder-initiated charge, then rebill with the mit block (recurring / subscriptions). → @vonpay/checkout-node
+- checkout-embedded — Embedded "Vora Mirror" card fields via the CDN <script>: collect card in-page, tokenize, charge the vp_pmt_* token server-side. → vora.js (CDN) + @vonpay/checkout-node
+- webhooks-node — Webhook receiver: verify signature, idempotent processing, replay-window enforcement. → @vonpay/checkout-node
+- agent-mcp — Wire @vonpay/checkout-mcp into an MCP-aware runtime (Claude Code, Cursor, Claude Desktop, custom agent). Config-only, no runtime to host. → @vonpay/checkout-mcp
+
+## Guardrails (get these right)
+
+1. Webhook signing secret is NOT your API key.
+   Verify webhooks with the per-endpoint signing secret `whsec_*` (env
+   VON_PAY_WEBHOOK_SECRET), not your `vp_sk_*` API key. The signature header is
+   `x-vonpay-signature: t=<unix>,v1=<hex>` — ONE format. The signed timestamp
+   lives inside the header (the `t=` part); there is no separate timestamp
+   header. Use `vonpay.webhooks.constructEvent(rawBody, signatureHeader, whsec)`
+   (3 args) over the RAW request body — it verifies and parses in one call.
+   Hosted-checkout webhook events today: session.succeeded, session.failed,
+   refund.created. The discrete payment-intents flow surfaces terminal state via
+   payment_intent.succeeded / payment_intent.failed. There is NO session.expired
+   and NO dispute.* event — do not claim them.
+
+2. Embedded card fields use the CDN <script>, not a processor SDK.
+   Load the browser SDK from the CDN <script> at
+   https://js.vonpay.com/v1/vora.js. Do NOT add or npm-install any
+   processor or card-network SDK for embedded checkout — the card
+   field is served by Von Payments and tokenizes the card in a hosted iframe so
+   card data never touches your server or DOM.
+
+3. Charging a saved card / recurring.
+   To charge a saved card, pass `payment_method: { id: "vp_pmt_*" }` to
+   `paymentIntents.create`. Recurring / merchant-initiated charges use the `mit`
+   block: `{ initiator: "merchant", reason: "recurring", originalTransactionId:
+   "<anchor vpi_* id>" }`. Vault a reusable card with
+   `tokens.create({ setupForFutureUse: "off_session" })`.
+
+## Return URL signature
+
+Return-URL signatures are auto-detected. The v2 prefix is `v2.` (a DOT), e.g.
+`?sig=v2.xxxxx` — NOT `v2_`. Verify with the session signing secret (`ss_test_*`
+/ `ss_live_*`), not the API key.
+
+## Key prefixes
+
+- vp_sk_test_* / vp_sk_live_* — secret API key (server-only)
+- vp_pk_test_* / vp_pk_live_* — publishable key
+- ss_test_* / ss_live_* — session signing secret (return-URL verification)
+- whsec_* — per-endpoint webhook signing secret (webhook verification)
+- vp_pmt_* — saved-card / payment-method token
+- vpi_* — payment intent id
+- vp_cs_* — checkout session id
+- vpr_* — refund id
+
+## Docs
+
+- Quickstart: https://docs.vonpay.com/quickstart
+- SDK references: https://docs.vonpay.com/sdks
+- API / webhooks / errors / test cards: https://docs.vonpay.com/reference
+- Sample repo: https://github.com/Von-Payments/vonpay-samples

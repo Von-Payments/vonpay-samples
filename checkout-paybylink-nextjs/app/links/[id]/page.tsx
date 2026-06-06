@@ -69,7 +69,7 @@ export default async function LinkDetailPage({
         <h2>Status</h2>
         <LinkStatusPoller id={link.id} initialStatus={link.status} initialTransactionId={link.transactionId} />
         <p style={{ fontSize: 13, color: "#666" }}>
-          Updates when the session.succeeded / session.failed / session.expired webhook arrives at
+          Updates when the session.succeeded / session.failed webhook arrives at
           <code> /api/webhooks</code>.
         </p>
       </section>

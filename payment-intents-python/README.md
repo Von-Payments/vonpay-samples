@@ -2,8 +2,8 @@
 
 Server-side payment intent flow: **authorize -> capture -> partial refund**, plus an idempotency replay. Single-script Python demo against the Vonpay Checkout API.
 
-- **Stack:** Python 3.11+, type-hinted
-- **SDK:** [`vonpay-checkout==0.5.0`](https://pypi.org/project/vonpay-checkout/)
+- **Stack:** Python 3.9+, type-hinted
+- **SDK:** [`vonpay-checkout==0.9.1`](https://pypi.org/project/vonpay-checkout/)
 - **Best for:** B2B / invoicing flows, headless billing where the merchant server drives the lifecycle (no hosted checkout)
 
 ## What it demonstrates
@@ -11,11 +11,11 @@ Server-side payment intent flow: **authorize -> capture -> partial refund**, plu
 | Step | Endpoint | How it's called |
 |---|---|---|
 | 1. Create a manual-capture intent | `POST /v1/payment_intents` | `vonpay.payment_intents.create()` |
-| 2. Capture the full authorized amount | `POST /v1/payment_intents/{id}/capture` | raw `httpx.post` (see note below) |
-| 3. Partial refund | `POST /v1/refunds` | raw `httpx.post` (see note below) |
+| 2. Capture the full authorized amount | `POST /v1/payment_intents/{id}/capture` | `vonpay.payment_intents.capture()` |
+| 3. Partial refund | `POST /v1/refunds` | `vonpay.refunds.create()` |
 | 4. Idempotency replay | `POST /v1/payment_intents` (same `Idempotency-Key`) | `vonpay.payment_intents.create()` |
 
-> **SDK surface note.** Published `vonpay-checkout==0.5.0` exposes only `payment_intents.create` and `capabilities.get`. Capture and refund use raw HTTP here — same auth, same headers, same idempotency semantics. When `0.6.x` ships, swap them for `vonpay.payment_intents.capture()` and `vonpay.refunds.create()`. The sample uses `httpx` (already a transitive dependency of `vonpay-checkout`) so there's no second HTTP library to install.
+Every step goes through the SDK — `payment_intents.create`, `payment_intents.capture`, and `refunds.create` are all native methods that handle auth, the `Von-Pay-Version` header, idempotency, and retries for you. (Need to release an authorization instead of capturing it? `vonpay.payment_intents.void(intent_id)` is the matching call.)
 
 ## Setup
 
@@ -39,7 +39,7 @@ python main.py
 The script runs once and exits. Expected output (sandbox happy path):
 
 ```
-payment-intents-python sample {'base_url': 'https://checkout-staging.vonpay.com', 'run_id': '...'}
+payment-intents-python sample {'base_url': 'https://checkout.vonpay.com', 'run_id': '...'}
 created {'id': 'vpi_test_...', 'status': 'authorized', 'capture_method': 'manual', 'amount': 2500, 'currency': 'USD'}
 captured {'id': 'vpi_test_...', 'status': 'succeeded', 'amount': 2500}
 refunded {'id': 'vpr_test_...', 'payment_intent': 'vpi_test_...', 'amount': 500, 'status': 'succeeded'}
@@ -54,7 +54,7 @@ The two intent IDs in `idempotency-replay` are identical because the server shor
 | File | What it does |
 |---|---|
 | `main.py` | The sample — runnable end-to-end |
-| `requirements.txt` | `vonpay-checkout==0.5.0` + `python-dotenv` for `.env` loading |
+| `requirements.txt` | `vonpay-checkout==0.9.1` + `python-dotenv` for `.env` loading |
 | `.env.example` | Copy to `.env` and paste your sandbox key |
 
 ## Configuration
@@ -62,9 +62,9 @@ The two intent IDs in `idempotency-replay` are identical because the server shor
 | Env var | Required | Default |
 |---|---|---|
 | `VON_PAY_SECRET_KEY` | yes | — |
-| `VON_PAY_BASE_URL` | no | `https://checkout-staging.vonpay.com` |
+| `VON_PAY_BASE_URL` | no | `https://checkout.vonpay.com` |
 
-The default base URL is staging because the sample is shipped with sandbox keys in mind. Point at `https://checkout.vonpay.com` once you've moved to a live `vp_sk_live_...` key.
+The default base URL is production (`checkout.vonpay.com`). A `vp_sk_test_` key runs in sandbox mode there, so no host change is needed; set `VON_PAY_BASE_URL` only if support directs you to a different host.
 
 `python-dotenv` reads `.env` automatically when the script starts. If you prefer to manage env vars at the shell level, the sample works equally well with `export VON_PAY_SECRET_KEY=...` and no `.env` file.
 
@@ -80,14 +80,12 @@ Re-running the script gives you a fresh `run_id`, so you get a fresh authorize. 
 
 ## Error handling
 
-Each step is wrapped in `try`/`except`. Both `VonPayError` (from the SDK) and the raw-HTTP error path log:
+Each step is wrapped in `try`/`except VonPayError`. `VonPayError` carries:
 
 - `code` — machine-readable error code (e.g. `validation_invalid_amount`, `invalid_transition`)
 - `status` — HTTP status
 - `request_id` — `X-Request-Id` header, paste this when filing a support ticket
-- `current_status` + `reject_reason` — populated on `422 invalid_transition` from the lifecycle endpoints
-
-`current_status` and `reject_reason` are SDK 0.6.x attributes; the sample reads them with `getattr(err, ..., None)` so it stays compatible with the published 0.5.0 release.
+- `current_status` + `reject_reason` — populated on `422 invalid_transition` from the lifecycle endpoints (capture / void / refund), so you can branch (e.g. "already captured", "not authorized") without a follow-up retrieve
 
 ## Going to production
 
@@ -104,4 +102,4 @@ Each step is wrapped in `try`/`except`. Both `VonPayError` (from the SDK) and th
 
 ## Tested against
 
-`vonpay-checkout==0.5.0` — last verified 2026-05-06.
+`vonpay-checkout==0.9.1` — `python -m py_compile` clean; live sandbox run needs a `vp_sk_test_...` key.

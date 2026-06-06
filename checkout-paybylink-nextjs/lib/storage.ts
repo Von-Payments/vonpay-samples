@@ -1,4 +1,4 @@
-export type LinkStatus = "pending" | "paid" | "failed" | "expired";
+export type LinkStatus = "pending" | "paid" | "failed";
 
 export interface PayLink {
   id: string;

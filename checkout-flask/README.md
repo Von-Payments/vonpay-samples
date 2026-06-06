@@ -1,110 +1,79 @@
 # Von Payments Checkout — Flask sample
 
-Server-only reference integration for the **cart → redirect** pattern using the Python SDK on Flask. A merchant server creates a session, redirects the buyer to `checkout.vonpay.com`, and verifies both the signed return redirect and the HMAC-signed webhook when the session resolves.
+Minimal end-to-end reference integration on Flask 3: create a session, redirect the buyer to `checkout.vonpay.com`, verify the signed return redirect on `/success`, and verify HMAC webhooks on `/webhooks`. Python equivalent of the Express and Next.js samples.
 
-- **Stack:** Python 3.9+, Flask
-- **SDK:** [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/)
-- **Best for:** Python services, internal billing, SaaS server-side
-
-## What it demonstrates
-
-| Feature | Where |
-|---|---|
-| Session creation | `app.py` → `POST /checkout` |
-| Return URL signature verification (v1 + v2 auto-detect) | `app.py` → `GET /success` |
-| HMAC-SHA256 webhook signature verification | `app.py` → `POST /webhooks` |
-| Health check (SDK → API connectivity) | `app.py` → `GET /health` |
+- **Stack:** Flask 3+, Python 3.9+
+- **Von Payments SDK:** [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) `==0.9.1`
+- **What it demonstrates:** session creation, signed return verification, HMAC webhook verification with raw-body parsing
 
 ## 5-minute setup
 
-### 1. Get sandbox keys
+### 1. Get test keys
 
-Sign up at [app.vonpay.com](https://app.vonpay.com), complete OTP, then `/dashboard/developers` → **Activate Vora Sandbox**. You'll get:
+Sign up at [app.vonpay.com](https://app.vonpay.com), complete OTP, then `/dashboard/developers` → **Create sandbox**. Copy the values from the banner (only shown once):
 
 - `vp_sk_test_...` — secret API key
-- `ss_test_...` — session signing secret
+- `ss_test_...` — session signing secret (used to verify redirect signatures)
+- `whsec_...` — per-endpoint webhook signing secret (shown when you register a webhook endpoint)
 
-### 2. Configure + run
+### 2. Install and run
 
 ```bash
-cp .env.example .env
-# edit .env — paste in vp_sk_test_... and ss_test_...
-
-python -m venv .venv
-source .venv/bin/activate    # Windows: .venv\Scripts\activate
+python -m venv .venv && source .venv/bin/activate    # or .venv\Scripts\activate on Windows
 pip install -r requirements.txt
 
-# Load env vars then run (use python-dotenv, direnv, or your shell):
-export $(grep -v '^#' .env | xargs)
-python app.py
+cp .env.example .env
+# edit .env — paste in vp_sk_test_..., ss_test_..., and whsec_...
+
+export VON_PAY_SECRET_KEY=vp_sk_test_...
+export VON_PAY_SESSION_SECRET=ss_test_...
+export VON_PAY_WEBHOOK_SECRET=whsec_...
+export BASE_URL=http://localhost:5000
+
+flask --app app run
 ```
 
-Open `http://localhost:3000`, click **Pay $14.99**, complete checkout with a [test card](https://docs.vonpay.com/reference/test-cards) (e.g. `4242 4242 4242 4242`), watch the success page render.
+Open [http://localhost:5000](http://localhost:5000), click **Pay**, complete checkout at `checkout.vonpay.com`, watch the redirect come back signed and verified on `/success`.
 
-### 3. Test the webhook (optional)
+### 3. Watch the webhook
 
-Expose port 3000 via [`ngrok`](https://ngrok.com) or [`cloudflared`](https://github.com/cloudflare/cloudflared) and register the public URL as your webhook endpoint in the dashboard. Complete a checkout and watch `Webhook: session.succeeded — session sess_...` log.
+Webhooks arrive at `POST /webhooks`. For local dev, tunnel your port and point the webhook URL at the tunnel:
 
-## File layout
-
-```
-checkout-flask/
-├── app.py             # Flask app — all routes
-├── requirements.txt   # vonpay-checkout, flask
-└── .env.example
+```bash
+# In another terminal
+ngrok http 5000
+# Register https://<id>.ngrok.io/webhooks in /dashboard/developers/webhooks
 ```
 
-## Key code
+## How it works
 
-**Session creation** — `app.py`:
-
-```python
-session = checkout.sessions.create(
-    amount=1499,
-    currency="USD",
-    country="US",
-    success_url=f"{BASE_URL}/success",
-)
-return redirect(session.checkout_url)
+```
+app.py           — Flask app: /, /checkout, /webhooks, /success, /health
+requirements.txt — flask + vonpay-checkout
 ```
 
-**Return signature verification** — `GET /success`:
+The `sessions.create()` call returns a `CheckoutSession` dataclass with `id`, `checkout_url`, `expires_at`. The server redirects the buyer to `checkout_url`. After payment, the buyer is redirected back to `/success` with a signed query string that `VonPayCheckout.verify_return_signature(params, session_secret, ...)` validates.
 
-```python
-expected_mode = "test" if "_test_" in API_KEY else "live"
-if VonPayCheckout.verify_return_signature(
-    params,
-    SESSION_SECRET,
-    expected_success_url=f"{BASE_URL}/success",
-    expected_key_mode=expected_mode,
-    max_age_seconds=600,
-):
-    # render success
-```
+Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header — there is no separate timestamp header). `checkout.webhooks.construct_event(raw_body, signature_header, webhook_secret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent`. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) — not your API key.
 
-The SDK auto-detects v1 vs v2 signatures from the `sig` parameter; pass v2 kwargs unconditionally — v1 ignores them. See [docs.vonpay.com/integration/handle-return](https://docs.vonpay.com/integration/handle-return).
+The webhook handler branches on `event.event`. Only `session.succeeded` means the buyer actually paid — do **not** fulfill on `session.failed`. Unknown event types are acked (200) with no action.
 
-**Webhook verification** — `POST /webhooks`:
+## Security notes
 
-```python
-body = request.get_data(as_text=True)
-event = checkout.webhooks.construct_event(
-    body,
-    request.headers.get("X-VonPay-Signature", ""),
-    API_KEY,
-    request.headers.get("X-VonPay-Timestamp", ""),
-)
-```
-
-`request.get_data(as_text=True)` returns the **raw** request body — required so the HMAC matches byte-for-byte.
+- **Always use raw body for webhook verification.** This sample uses `request.get_data(as_text=True)` to grab the unparsed body before signature verification.
+- **Three different secrets.** The webhook signing secret (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) signs webhooks. The API key (`vp_sk_*`) authenticates API calls. The session signing secret (`ss_*`) signs return-URL redirects.
+- **Session IDs are deep-link tokens.** Keep `event.session_id` / `event.transaction_id` out of general application logs.
 
 ## Going to production
 
-- Move `VON_PAY_SECRET_KEY` and `VON_PAY_SESSION_SECRET` into your secret manager. Never commit `.env`.
+- Move `VON_PAY_SECRET_KEY`, `VON_PAY_SESSION_SECRET`, and `VON_PAY_WEBHOOK_SECRET` into your secret manager. Never commit `.env`.
 - Switch from `vp_sk_test_*` to `vp_sk_live_*` after KYC + contract review — see [Going Live](https://docs.vonpay.com/guides/going-live).
-- Add idempotency to the webhook handler — `event.id` is unique per delivery; cache seen IDs (Redis recommended) to handle retries.
 - Run behind a real WSGI server (gunicorn, uWSGI) — not Flask's dev server.
 
-## Tested against
+## Related
 
-`vonpay-checkout==0.5.0` · last verified 2026-05-06
+- [Quickstart](https://docs.vonpay.com/quickstart)
+- [Python SDK reference](https://docs.vonpay.com/sdks/python-sdk)
+- [Webhook verification guide](https://docs.vonpay.com/integration/webhook-verification)
+- `checkout-express` — Node equivalent
+- `checkout-nextjs` — Next.js App Router (cart → redirect)

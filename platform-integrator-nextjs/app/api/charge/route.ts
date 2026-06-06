@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
     apiKey: credentials.vpSk,
     // Pin the API version. The platform's adapter contract changes
     // when this changes — leave it explicit, don't track latest.
-    apiVersion: "2026-04-14",
+    apiVersion: "2026-05-05",
   });
 
   // Idempotency-Key — every connector should send one. If the platform
@@ -84,9 +84,12 @@ export async function POST(req: NextRequest) {
     // 303 See Other ensures the browser GETs the checkoutUrl after a POST.
     return NextResponse.redirect(session.checkoutUrl, 303);
   } catch (err) {
+    // Log the detail server-side only. Never forward String(err) to the caller
+    // — a VonPayError message can carry a request id, decline code, or key
+    // prefix that should not leave the server.
     console.error(`Session create failed for tenant ${tenantId}:`, err);
     return NextResponse.json(
-      { error: "session_create_failed", detail: String(err) },
+      { error: "session_create_failed" },
       { status: 502 },
     );
   }

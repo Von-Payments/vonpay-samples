@@ -1,102 +1,62 @@
 # Von Payments Checkout — Express sample
 
-Server-only reference integration for the **cart → redirect** pattern using the Node.js SDK on Express. A merchant server creates a session, redirects the buyer to `checkout.vonpay.com`, and verifies both the signed return redirect and the HMAC-signed webhook when the session resolves.
+Minimal end-to-end reference integration on Express 5: create a session, redirect the buyer to `checkout.vonpay.com`, verify the signed return redirect on `/success`, and verify HMAC webhooks on `/webhooks`.
 
-- **Stack:** Node 20+, Express 5, TypeScript strict, ESM
-- **SDK:** [`@vonpay/checkout-node@0.5.0`](https://www.npmjs.com/package/@vonpay/checkout-node)
-- **Best for:** headless backends, API-only flows, server-rendered apps with no frontend framework
-
-## What it demonstrates
-
-| Feature | Where |
-|---|---|
-| Session creation with line items | `server.ts` → `POST /checkout` |
-| Return URL signature verification (v1 + v2 auto-detect) | `server.ts` → `GET /success` |
-| HMAC-SHA256 webhook signature verification | `server.ts` → `POST /webhooks` |
-| Health check (SDK → API connectivity) | `server.ts` → `GET /health` |
+- **Stack:** Express 5, TypeScript (run via `tsx`)
+- **Von Payments SDK:** `@vonpay/checkout-node@^0.9.0`
+- **What it demonstrates:** session creation, signed return verification, HMAC webhook verification with raw-body parsing
 
 ## 5-minute setup
 
-### 1. Get sandbox keys
+### 1. Get test keys
 
-Sign up at [app.vonpay.com](https://app.vonpay.com), complete OTP, then `/dashboard/developers` → **Activate Vora Sandbox**. You'll get:
+Sign up at [app.vonpay.com](https://app.vonpay.com), complete OTP, then `/dashboard/developers` → **Create sandbox**. Copy the values from the banner (only shown once):
 
 - `vp_sk_test_...` — secret API key
-- `ss_test_...` — session signing secret
+- `ss_test_...` — session signing secret (used to verify redirect signatures)
 
-### 2. Configure + run
+### 2. Install and run
 
 ```bash
-cp .env.example .env
-# edit .env — paste in vp_sk_test_... and ss_test_...
+export VON_PAY_SECRET_KEY=vp_sk_test_...
+export VON_PAY_SESSION_SECRET=ss_test_...
 
 npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`, click **Pay $25.00**, complete checkout with a [test card](https://docs.vonpay.com/reference/test-cards) (e.g. `4242 4242 4242 4242`), watch the return page render with the verified session details.
+Open [http://localhost:3000](http://localhost:3000), click the **Pay** button, complete checkout at `checkout.vonpay.com`, watch the redirect come back signed and verified on `/success`.
 
-### 3. Test the webhook (optional)
+### 3. Watch the webhook
 
-To exercise webhook verification locally, expose port 3000 via [`ngrok`](https://ngrok.com) or [`cloudflared`](https://github.com/cloudflare/cloudflared) and register the public URL as your webhook endpoint in the dashboard. Then complete a checkout and watch `Webhook received: session.succeeded` log.
+Webhooks arrive at `POST /webhooks`. For local dev, tunnel your port and point the webhook URL at the tunnel:
 
-## File layout
-
-```
-checkout-express/
-├── server.ts          # Express app — all routes + handlers
-├── package.json
-├── tsconfig.json
-└── .env.example
+```bash
+# In another terminal
+ngrok http 3000
+# Register https://<id>.ngrok.io/webhooks in /dashboard/developers/webhooks
 ```
 
-## Key code
+## How it works
 
-**Session creation** — `server.ts`:
-
-```typescript
-const session = await vonpay.sessions.create({
-  amount: 2500,
-  currency: "USD",
-  successUrl: `http://localhost:${port}/success`,
-  cancelUrl: `http://localhost:${port}/`,
-  lineItems: [{ name: "Sample Item", quantity: 1, unitAmount: 2500 }],
-});
-res.redirect(303, session.checkoutUrl);
+```
+server.ts        — Express server: /, /checkout, /webhooks, /success, /health
 ```
 
-**Return signature verification** — `GET /success`:
+The `sessions.create()` call returns `{ id, checkoutUrl, expiresAt }`. The server redirects the buyer to `checkoutUrl`. After payment, the buyer is redirected back to `/success` with a signed query string that `VonPayCheckout.verifyReturnSignature(params, sessionSecret, ...)` validates.
 
-```typescript
-const valid = VonPayCheckout.verifyReturnSignature(params, sessionSecret, {
-  expectedSuccessUrl: `http://localhost:${port}/success`,
-  expectedKeyMode: apiKey.includes("_test_") ? "test" : "live",
-  maxAgeSeconds: 600,
-});
-```
+Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header — there is no separate timestamp header). `vonpay.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent` discriminated union. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) — not your API key.
 
-The SDK auto-detects v1 vs v2 signatures from the `sig` parameter prefix; pass v2 options unconditionally — v1 ignores them. See [docs.vonpay.com/integration/handle-return](https://docs.vonpay.com/integration/handle-return) for the full spec.
+## Security notes
 
-**Webhook verification** — `POST /webhooks`:
+- **Always use raw body for webhook verification.** This sample mounts `express.text({ type: "application/json" })` only on `/webhooks` so the body is a `string`, not a parsed object.
+- **Pin the SDK.** `"latest"` drifts silently; this sample pins `^0.9.0`.
+- **Three different secrets.** The webhook signing secret (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) signs webhooks. The API key (`vp_sk_*`) authenticates API calls. The session signing secret (`ss_*`) signs return-URL redirects.
 
-```typescript
-const event = vonpay.webhooks.constructEvent(
-  rawBody,
-  req.headers["x-vonpay-signature"],
-  apiKey,
-  req.headers["x-vonpay-timestamp"],
-);
-```
+## Related
 
-The handler must read the **raw** request body (note the `express.text({ type: "application/json" })` middleware before `express.json()`) so the HMAC matches byte-for-byte.
-
-## Going to production
-
-- Move `VON_PAY_SECRET_KEY` and `VON_PAY_SESSION_SECRET` into your secret manager (AWS Secrets Manager, HashiCorp Vault, Doppler, etc.). Never commit them.
-- Switch from `vp_sk_test_*` to `vp_sk_live_*` after KYC + contract review — see [Going Live](https://docs.vonpay.com/guides/going-live).
-- Add idempotency to the webhook handler — `event.id` is unique per delivery; cache seen IDs (Redis recommended) to handle retries.
-- Add request-rate limiting on `POST /checkout` to prevent abuse.
-
-## Tested against
-
-`@vonpay/checkout-node@0.5.0` · last verified 2026-05-06
+- [Quickstart](https://docs.vonpay.com/quickstart)
+- [Node SDK reference](https://docs.vonpay.com/sdks/node-sdk)
+- [Webhook verification guide](https://docs.vonpay.com/integration/webhook-verification)
+- `samples/checkout-nextjs` — same flow on Next.js App Router
+- `samples/checkout-flask` — Python equivalent

@@ -29,7 +29,7 @@ export default function LinkStatusPoller({ id, initialStatus, initialTransaction
   }, [id, status]);
 
   const color =
-    status === "paid" ? "#0a7a2f" : status === "failed" ? "#b00020" : status === "expired" ? "#855" : "#666";
+    status === "paid" ? "#0a7a2f" : status === "failed" ? "#b00020" : "#666";
 
   return (
     <p style={{ fontSize: 20, fontWeight: 600, color }}>

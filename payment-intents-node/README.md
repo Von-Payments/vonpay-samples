@@ -3,7 +3,7 @@
 Server-side payment intent flow: **authorize → capture → partial refund**, plus an idempotency replay. Single-script Node.js demo against the Vonpay Checkout API.
 
 - **Stack:** Node 20+, TypeScript strict, ESM
-- **SDK:** [`@vonpay/checkout-node@0.5.0`](https://www.npmjs.com/package/@vonpay/checkout-node)
+- **SDK:** [`@vonpay/checkout-node@^0.9.0`](https://www.npmjs.com/package/@vonpay/checkout-node)
 - **Best for:** B2B / invoicing flows, headless billing where the merchant server drives the lifecycle (no hosted checkout)
 
 ## What it demonstrates
@@ -11,11 +11,11 @@ Server-side payment intent flow: **authorize → capture → partial refund**, p
 | Step | Endpoint | How it's called |
 |---|---|---|
 | 1. Create a manual-capture intent | `POST /v1/payment_intents` | `vonpay.paymentIntents.create()` |
-| 2. Capture the full authorized amount | `POST /v1/payment_intents/{id}/capture` | raw `fetch` (see note below) |
-| 3. Partial refund | `POST /v1/refunds` | raw `fetch` (see note below) |
+| 2. Capture the full authorized amount | `POST /v1/payment_intents/{id}/capture` | `vonpay.paymentIntents.capture()` |
+| 3. Partial refund | `POST /v1/refunds` | `vonpay.refunds.create()` |
 | 4. Idempotency replay | `POST /v1/payment_intents` (same `Idempotency-Key`) | `vonpay.paymentIntents.create()` |
 
-> **SDK surface note.** Published `@vonpay/checkout-node@0.5.0` exposes only `paymentIntents.create` and `capabilities.get`. Capture and refund use raw `fetch` here — same auth, same headers, same idempotency semantics. When `0.6.x` ships, swap them for `vonpay.paymentIntents.capture()` and `vonpay.refunds.create()`.
+Every step runs through the typed SDK surface — no hand-rolled HTTP. Each call accepts an `{ idempotencyKey }` option so retries collapse cleanly, and lifecycle failures throw a typed `VonPayError` carrying `code`, `status`, `requestId`, and (on `422 invalid_transition`) `currentStatus` + `rejectReason`.
 
 ## Setup
 
@@ -36,7 +36,7 @@ npm run dev
 The script runs once and exits. Expected output (sandbox happy path):
 
 ```
-payment-intents-node sample { baseUrl: 'https://checkout-staging.vonpay.com', runId: '...' }
+payment-intents-node sample { baseUrl: 'https://checkout.vonpay.com', runId: '...' }
 created { id: 'vpi_test_...', status: 'authorized', captureMethod: 'manual', amount: 2500, currency: 'USD' }
 captured { id: 'vpi_test_...', status: 'succeeded', amount: 2500 }
 refunded { id: 'vpr_test_...', paymentIntent: 'vpi_test_...', amount: 500, status: 'succeeded' }
@@ -59,9 +59,9 @@ The two intent IDs in `idempotency-replay` are identical because the server shor
 | Env var | Required | Default |
 |---|---|---|
 | `VON_PAY_SECRET_KEY` | yes | — |
-| `VON_PAY_BASE_URL` | no | `https://checkout-staging.vonpay.com` |
+| `VON_PAY_BASE_URL` | no | `https://checkout.vonpay.com` |
 
-The default base URL is staging because the sample is shipped with sandbox keys in mind. Point at `https://checkout.vonpay.com` once you've moved to a live `vp_sk_live_…` key.
+The default base URL is production (`checkout.vonpay.com`). A `vp_sk_test_` key runs in sandbox mode there, so no host change is needed; set `VON_PAY_BASE_URL` only if support directs you to a different host.
 
 ## How idempotency works here
 
@@ -75,18 +75,19 @@ Re-running the script gives you a fresh `runId`, so you get a fresh authorize. R
 
 ## Error handling
 
-Each step is wrapped in `try`/`catch`. Both `VonPayError` (from the SDK) and the raw-fetch error path log:
+Each step is wrapped in `try`/`catch`. Every lifecycle call throws a typed `VonPayError` (from the SDK) on failure, which logs:
 
 - `code` — machine-readable error code (e.g. `validation_invalid_amount`, `invalid_transition`)
 - `status` — HTTP status
 - `requestId` — `X-Request-Id` header, paste this when filing a support ticket
-- `currentStatus` + `rejectReason` — populated on `422 invalid_transition` from the lifecycle endpoints
+- `currentStatus` + `rejectReason` — populated on `422 invalid_transition` from the lifecycle endpoints (capture / void / refund), so you can branch (e.g. void → refund) without a follow-up retrieve
+- `nextAction` — programmatic decision helper (`fix_input` / `wait_and_retry` / `contact_support` / …) for agent or LLM consumers
 
 ## Going to production
 
 - Move `VON_PAY_SECRET_KEY` into your secret manager (AWS Secrets Manager, Vault, Doppler, etc.). Never commit it.
 - Treat `Idempotency-Key` as required, not optional. Use a deterministic value tied to the upstream order (e.g. `order:{order_id}:authorize`) so retries collapse cleanly.
-- Read `vonpay.capabilities.get()` once at startup — it tells you whether `void_after_capture` is `rerouted_to_refund` (most processors), so you can branch between void and refund without round-tripping a failed call.
+- Read `vonpay.capabilities.get()` once at startup — `supportedOperations.voidAfterCapture` tells you whether a post-capture void is `rerouted_to_refund` (most processors), so you can branch between `paymentIntents.void()` and `refunds.create()` without round-tripping a failed call.
 - Inspect `intent.status` after `create`. Sandbox returns `failed` for amount `200` (deterministic decline trigger) — your code should handle the decline path, not just the happy path.
 
 ## Reference docs
@@ -97,4 +98,4 @@ Each step is wrapped in `try`/`catch`. Both `VonPayError` (from the SDK) and the
 
 ## Tested against
 
-`@vonpay/checkout-node@0.5.0` — last verified 2026-05-06.
+`@vonpay/checkout-node@0.9.1` — typecheck verified 2026-06-05. Live sandbox smoke (auth → capture → refund → idempotency replay) requires a `vp_sk_test_…` key.

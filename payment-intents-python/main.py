@@ -8,10 +8,9 @@ Demonstrates the manual-capture lifecycle for the Vonpay Checkout API:
   4. Replay step 1 with the same Idempotency-Key — server returns the
      original intent, not a duplicate.
 
-SDK 0.5.0 exposes ``payment_intents.create`` and ``capabilities.get`` only.
-Capture and refund are called through raw HTTP here (httpx, the SDK's own
-transport, so we don't pull a second dependency); switch to
-``payment_intents.capture`` and ``refunds.create`` once 0.6.x ships.
+Every call goes through the SDK: ``payment_intents.create``,
+``payment_intents.capture``, and ``refunds.create`` are all native methods.
+The SDK handles auth, the ``Von-Pay-Version`` header, idempotency, and retries.
 """
 
 from __future__ import annotations
@@ -20,12 +19,9 @@ import os
 import secrets
 import sys
 import time
-from typing import Any, TypedDict
-from urllib.parse import quote
 
-import httpx
 from dotenv import load_dotenv
-from vonpay.checkout import PaymentIntent, VonPayCheckout, VonPayError
+from vonpay.checkout import PaymentIntent, Refund, VonPayCheckout, VonPayError
 
 load_dotenv()
 
@@ -39,140 +35,30 @@ if not SECRET_KEY:
 
 BASE_URL = (
     os.environ.get("VON_PAY_BASE_URL", "").rstrip("/")
-    or "https://checkout-staging.vonpay.com"
+    or "https://checkout.vonpay.com"
 )
 
 vonpay = VonPayCheckout(SECRET_KEY, base_url=BASE_URL)
 
 
-class RefundWire(TypedDict):
-    """Wire shape (snake_case) of the Refund returned by /v1/refunds."""
-
-    id: str
-    payment_intent: str
-    amount: int
-    currency: str
-    status: str  # "pending" | "succeeded" | "failed"
-    reason: str | None
-
-
-class PaymentIntentWire(TypedDict, total=False):
-    """Wire shape (snake_case) of the PaymentIntent returned by capture."""
-
-    id: str
-    status: str
-    amount: int
-    currency: str
-    capture_method: str
-    next_action: str | None
-    decline_code: str | None
-    created_at: str
-    metadata: dict[str, str]
-
-
-class _RawHttpError(Exception):
-    """Error raised by ``vonpay_post`` on a non-2xx response.
-
-    Carries the same fields as ``VonPayError`` (status, code, request_id,
-    current_status, reject_reason) so ``log_error`` treats both paths the
-    same. When SDK 0.6.x lands, raw HTTP calls collapse into SDK calls and
-    this class disappears.
-    """
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        status: int | None = None,
-        code: str | None = None,
-        request_id: str | None = None,
-        current_status: str | None = None,
-        reject_reason: str | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.status = status
-        self.code = code
-        self.request_id = request_id
-        self.current_status = current_status
-        self.reject_reason = reject_reason
-
-
-def vonpay_post(
-    path: str,
-    body: dict[str, Any],
-    idempotency_key: str,
-) -> dict[str, Any]:
-    """Raw HTTP call against Vonpay endpoints not yet wrapped by SDK 0.5.0.
-
-    Matches the SDK's auth + idempotency + Von-Pay-Version conventions so a
-    future migration to ``payment_intents.capture`` / ``refunds.create`` is a
-    one-liner.
-    """
-    headers = {
-        "Authorization": f"Bearer {SECRET_KEY}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "Idempotency-Key": idempotency_key,
-    }
-    response = httpx.post(f"{BASE_URL}{path}", headers=headers, json=body, timeout=30.0)
-    request_id = response.headers.get("X-Request-Id", "")
-
-    if response.is_success:
-        return response.json()  # type: ignore[no-any-return]
-
-    payload: dict[str, Any] = {}
-    try:
-        payload = response.json()
-    except (ValueError, httpx.DecodingError):
-        # Body wasn't JSON — fall through with empty payload.
-        pass
-
-    raise _RawHttpError(
-        f"{path} failed: {response.status_code} {payload.get('code', 'unknown')} — "
-        f"{payload.get('error', response.reason_phrase)}",
-        status=response.status_code,
-        code=payload.get("code"),
-        request_id=request_id,
-        current_status=payload.get("current_status"),
-        reject_reason=payload.get("reject_reason"),
-    )
-
-
 def log_error(label: str, err: BaseException) -> None:
-    """Print a structured one-liner for either SDK or raw-HTTP errors.
+    """Print a structured one-liner for a ``VonPayError`` or any other throw.
 
-    ``VonPayError`` from the SDK exposes ``code`` / ``status`` / ``request_id``
-    directly, plus optional ``current_status`` / ``reject_reason`` on 422
-    invalid_transition responses from lifecycle endpoints. The raw-HTTP path
-    raises ``_RawHttpError`` with the same shape.
+    ``VonPayError`` exposes ``code`` / ``status`` / ``request_id`` on every
+    error, plus ``current_status`` / ``reject_reason`` on ``422
+    invalid_transition`` responses from the lifecycle endpoints (capture /
+    void / refund) — read those to branch without a follow-up retrieve.
     """
     if isinstance(err, VonPayError):
-        # current_status / reject_reason are only attributes on SDK >= 0.6.x;
-        # 0.5.0 may not have them. getattr with default keeps this sample
-        # forward-compatible without breaking on the published 0.5.0.
         print(
             f"[{label}] VonPayError",
             {
                 "code": err.code,
                 "status": err.status,
                 "request_id": err.request_id,
-                "current_status": getattr(err, "current_status", None),
-                "reject_reason": getattr(err, "reject_reason", None),
-                "message": str(err),
-            },
-            file=sys.stderr,
-        )
-        return
-    if isinstance(err, _RawHttpError):
-        print(
-            f"[{label}] HTTPError",
-            {
-                "message": str(err),
-                "status": err.status,
-                "code": err.code,
-                "request_id": err.request_id,
                 "current_status": err.current_status,
                 "reject_reason": err.reject_reason,
+                "message": str(err),
             },
             file=sys.stderr,
         )
@@ -234,48 +120,45 @@ def main() -> None:
         )
         sys.exit(1)
 
-    # 2. Capture the full authorized amount via raw HTTP (SDK 0.6.x).
-    captured: PaymentIntentWire
+    # 2. Capture the full authorized amount. Omitting amount_to_capture
+    # captures the full authorized total.
+    captured: PaymentIntent
     try:
-        captured = vonpay_post(  # type: ignore[assignment]
-            f"/v1/payment_intents/{quote(intent.id, safe='')}/capture",
-            {},
-            capture_key,
+        captured = vonpay.payment_intents.capture(
+            intent.id,
+            idempotency_key=capture_key,
         )
         print(
             "captured",
             {
-                "id": captured["id"],
-                "status": captured["status"],
-                "amount": captured["amount"],
+                "id": captured.id,
+                "status": captured.status,
+                "amount": captured.amount,
             },
         )
-    except _RawHttpError as err:
+    except VonPayError as err:
         log_error("capture", err)
         sys.exit(1)
 
-    # 3. Partial refund via raw HTTP (SDK 0.6.x).
-    refund: RefundWire
+    # 3. Partial refund — refund 500 of the 2500 captured.
+    refund: Refund
     try:
-        refund = vonpay_post(  # type: ignore[assignment]
-            "/v1/refunds",
-            {
-                "payment_intent": intent.id,
-                "amount": 500,
-                "reason": "customer_requested",
-            },
-            refund_key,
+        refund = vonpay.refunds.create(
+            payment_intent=intent.id,
+            amount=500,
+            reason="customer_requested",
+            idempotency_key=refund_key,
         )
         print(
             "refunded",
             {
-                "id": refund["id"],
-                "payment_intent": refund["payment_intent"],
-                "amount": refund["amount"],
-                "status": refund["status"],
+                "id": refund.id,
+                "payment_intent": refund.payment_intent,
+                "amount": refund.amount,
+                "status": refund.status,
             },
         )
-    except _RawHttpError as err:
+    except VonPayError as err:
         log_error("refund", err)
         sys.exit(1)
 
