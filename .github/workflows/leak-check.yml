@@ -1,0 +1,49 @@
+name: Leak check (public-safe)
+
+# vonpay-samples is a PUBLIC repo, so this gate is deliberately MINIMAL: it
+# scans only for patterns that are safe to enumerate in public — internal
+# ticket IDs and real secret-key material. It intentionally does NOT contain
+# the internal codename / vendor glossary, because publishing that denylist
+# in a public repo would itself be a leak.
+#
+# Full-glossary coverage (mission codenames, orchestration-vendor names,
+# internal jargon) runs as a scheduled deep-scan from the PRIVATE canonical
+# repo (Von-Payments/vonpay → .github/workflows/samples-leak-deep-scan.yml),
+# which clones this repo and scans it with the canonical rules without ever
+# exposing the glossary here.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  leak-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan for internal ticket IDs + secret material
+        run: |
+          set -uo pipefail
+          # Safe-to-name-in-public patterns only:
+          #   VON-####            internal Linear ticket IDs
+          #   vp_sk_(live|test)_  real secret API keys (>=20 contiguous entropy
+          #                       chars; underscore placeholders such as
+          #                       vp_sk_test_your_secret_key_here do NOT match)
+          #   whsec_              real webhook signing secrets (same heuristic)
+          PATTERN='VON-[0-9]+|vp_sk_(live|test)_[A-Za-z0-9]{20,}|whsec_[A-Za-z0-9]{20,}'
+          HITS=$(grep -rnE "$PATTERN" . \
+            --exclude-dir=node_modules --exclude-dir=.git \
+            --exclude-dir=.next --exclude-dir=dist --exclude-dir=build \
+            --exclude='package-lock.json' --exclude='pnpm-lock.yaml' --exclude='yarn.lock' \
+            2>/dev/null || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::Leak check found internal ticket IDs or secret material in customer-facing files:"
+            echo "$HITS"
+            exit 1
+          fi
+          echo "Leak check clean — no internal ticket IDs or secret material found."
