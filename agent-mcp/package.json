@@ -1,0 +1,10 @@
+{
+  "name": "agent-mcp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Wire Von Payments into any MCP-compatible AI agent — Claude Code, Cursor, Claude Desktop, Continue.dev, Windsurf, or custom runtime. Read-only sample; see README.md for the walkthrough.",
+  "license": "MIT",
+  "dependencies": {
+    "@vonpay/checkout-mcp": "^0.4.5"
+  }
+}

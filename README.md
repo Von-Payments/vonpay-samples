@@ -15,12 +15,16 @@ Official runnable sample integrations for the Von Payments Checkout API. Clone a
 | [`platform-integrator-nextjs`](./platform-integrator-nextjs) | Next.js 15 / React 19 | **Multi-tenant platform** — per-merchant credential lookup, tenant-scoped sessions, multi-tenant webhook routing | Subscription-billing CRMs, headless commerce platforms, ISVs reselling Vora to their merchants |
 | [`payment-intents-node`](./payment-intents-node) | Node 20+ / TypeScript | **Server-side Payment Intents** (auth → capture → refund, idempotency replay) | Delayed-capture flows, fraud-check-before-capture, platform integrators driving the lifecycle from their server |
 | [`payment-intents-python`](./payment-intents-python) | Python 3.11+ | Server-side Payment Intents (Python mirror of `payment-intents-node`) | Same as above, on Python stacks |
-| [`webhooks-node`](./webhooks-node) | Node 20+ / Express 5 / TypeScript | **Webhook receiver** — verify both signature formats, idempotent processing, replay-window enforcement | Any integration that needs to react to async events (`payment_intent.*`, `session.*`, `refund.*`, `dispute.*`) |
+| [`payment-intents-3ds`](./payment-intents-3ds) | Node 20+ / Express 5 / TypeScript | **3DS / `requires_action`** — branch on intent status, top-level redirect to the issuer challenge, confirm terminal state from the webhook | Card flows that hit a 3-D Secure challenge; anyone who must handle `requires_action` correctly |
+| [`saved-cards-mit`](./saved-cards-mit) | Node 20+ / TypeScript | **Saved cards + MIT** — vault a card off-session, anchor a cardholder-initiated charge, rebill with the `mit` block | Subscriptions, recurring billing, stored-credential rebills |
+| [`checkout-embedded`](./checkout-embedded) | Node 20+ / Express 5 / TypeScript + CDN `<script>` | **Embedded card fields (Vora Mirror)** — in-page card collection via `vora.js`, tokenize, charge the `vp_pmt_*` token server-side | In-page checkout without a redirect; staying out of PCI scope while keeping your own UI |
+| [`webhooks-node`](./webhooks-node) | Node 20+ / Express 5 / TypeScript | **Webhook receiver** — verify the `t=,v1=` signature with the `whsec_*` secret, idempotent processing, replay-window enforcement | Any integration that needs to react to async events (`session.*`, `refund.created`, `payment_intent.*`) |
+| [`agent-mcp`](./agent-mcp) | MCP config (no runtime) | **AI-agent integration** — wire `@vonpay/checkout-mcp` into Claude Code, Cursor, Claude Desktop, or any MCP runtime | Building (or coding with) an agent that creates sessions and drives the payment lifecycle |
 
 Each sample demonstrates the full checkout lifecycle:
 - **Session creation** — server-side, with line items + buyer info
-- **Return URL verification** — both v1 (`?sig=...`) and v2 (`?sig=v2_...`) signatures auto-detected
-- **Webhook handling** — HMAC-SHA256 signature verification + replay window
+- **Return URL verification** — both v1 (`?sig=...`) and v2 (`?sig=v2.…`) signatures auto-detected (the v2 prefix is `v2.` with a dot)
+- **Webhook handling** — HMAC-SHA256 signature verification with the per-endpoint `whsec_*` secret + replay window
 - **Production-shaped error handling** — typed `VonPayError` from `@vonpay/checkout-node`, decline-code awareness
 
 ## Five-minute setup
@@ -69,30 +73,34 @@ The samples themselves are written to be agent-paste-friendly: short files, expl
 
 ## SDKs
 
-| SDK | Package | Used in |
-|---|---|---|
-| Node.js | [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) | nextjs, express, paybylink-nextjs, platform-integrator-nextjs |
-| Python | [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) | flask, payment-intents-python |
-| CLI | [`@vonpay/checkout-cli`](https://www.npmjs.com/package/@vonpay/checkout-cli) | install separately for ad-hoc testing or agent-tool use |
-| MCP | [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp) | install in an MCP-aware runtime (Claude Desktop, Cursor, etc.) |
+| SDK | Package | Current version | Used in |
+|---|---|---|---|
+| Node.js | [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) | `0.9.1` | nextjs, express, paybylink-nextjs, platform-integrator-nextjs, payment-intents-node, payment-intents-3ds, saved-cards-mit, checkout-embedded, webhooks-node |
+| Python | [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) | `0.9.1` | flask, payment-intents-python |
+| CLI | [`@vonpay/checkout-cli`](https://www.npmjs.com/package/@vonpay/checkout-cli) | `0.4.1` | install separately for ad-hoc testing or agent-tool use |
+| MCP | [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp) | `0.4.5` | agent-mcp; install in an MCP-aware runtime (Claude Desktop, Cursor, etc.) |
 
-Samples pin to exact SDK versions during the pre-1.0 window. Renovate keeps the pins fresh — see [`renovate.json`](./renovate.json).
+Embedded card fields load the browser SDK (`vora.js`) from the CDN `<script>` at `https://js.vonpay.com/v1/vora.js` — there is no npm package for it; see [`checkout-embedded`](./checkout-embedded).
+
+During the pre-1.0 window the Node samples pin `@vonpay/checkout-node` to `^0.9.0` and the Python samples pin `vonpay-checkout==0.9.1`. The pins are bumped on each SDK release; [Renovate](./renovate.json) opens the bump PRs. Check a sample's `package.json` / `requirements.txt` for the version it's actually built against.
 
 ## Roadmap
 
 Not yet covered by the samples — by design or by product timing:
 
-- **Embedded card fields (Frame)** — direct in-page card collection without a redirect is in development; ETA Q3-Q4 2026. Until then, use the hosted-redirect samples or pair Payment Intents with a third-party iframe-vault provider (Spreedly).
 - **Mobile native (iOS / Android)** — no native SDKs yet; use the hosted checkout pattern from a webview in the meantime.
 - **Multi-acquirer routing UI** — routing happens server-side automatically; the public API exposes session outcome, not the decision tree. The story is at [vonpay.com/vora](https://vonpay.com/vora); a visual is at [`/demos/vora/orchestration`](https://vonpay.com/demos/vora/orchestration).
 
-> **Already covered:** Recurring billing / saved cards via the `mit` block on Payment Intents — see [`payment-intents-node`](./payment-intents-node) and the [Payment Intents guide](https://docs.vonpay.com/integration/payment-intents#saved-cards--merchant-initiated-mit-charges).
+> **Already covered:**
+> - **Embedded card fields (Vora Mirror)** — in-page card collection without a redirect, via `vora.js` from the CDN. See [`checkout-embedded`](./checkout-embedded).
+> - **Recurring billing / saved cards** — vault a card off-session, then rebill with the `mit` block on Payment Intents. See [`saved-cards-mit`](./saved-cards-mit) and the [Payment Intents guide](https://docs.vonpay.com/integration/payment-intents#saved-cards--merchant-initiated-mit-charges).
+> - **3DS / `requires_action`** — branch on intent status and redirect to the issuer challenge. See [`payment-intents-3ds`](./payment-intents-3ds).
 
 When the underlying product surfaces these, samples will land here.
 
 ## Contributing
 
-This repo mirrors a private internal monorepo. Bug reports + small fixes welcome via PR; larger changes (new samples, new patterns) — open an issue first so we can talk shape before you spend the time.
+Bug reports + small fixes welcome via PR; larger changes (new samples, new patterns) — open an issue first so we can talk shape before you spend the time.
 
 ## License
 

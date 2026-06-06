@@ -1,0 +1,21 @@
+{
+  "name": "payment-intents-3ds",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx tsx server.ts",
+    "start": "node --loader ts-node/esm server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vonpay/checkout-node": "^0.9.0",
+    "express": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "tsx": "^4.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.7.0"
+  }
+}

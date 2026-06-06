@@ -8,14 +8,15 @@
  *   4. Replay step 1 with the same Idempotency-Key — server returns the
  *      original intent, not a duplicate.
  *
- * SDK 0.5.0 exposes `paymentIntents.create` only. Capture and refund are
- * called through raw `fetch` here; switch to `paymentIntents.capture` and
- * `refunds.create` once 0.6.x ships.
+ * Every step runs through the typed SDK surface — `paymentIntents.create`,
+ * `paymentIntents.capture`, and `refunds.create` — and threads an
+ * `idempotencyKey` through the request options so retries collapse cleanly.
  */
 import {
   VonPayCheckout,
   VonPayError,
   type PaymentIntent,
+  type Refund,
 } from "@vonpay/checkout-node";
 
 const SECRET_KEY = process.env["VON_PAY_SECRET_KEY"];
@@ -28,120 +29,37 @@ if (!SECRET_KEY) {
 
 const BASE_URL =
   process.env["VON_PAY_BASE_URL"]?.replace(/\/+$/, "") ??
-  "https://checkout-staging.vonpay.com";
+  "https://checkout.vonpay.com";
 
 const vonpay = new VonPayCheckout({ apiKey: SECRET_KEY, baseUrl: BASE_URL });
 
-interface RefundWire {
-  id: string;
-  payment_intent: string;
-  amount: number;
-  currency: string;
-  status: "pending" | "succeeded" | "failed";
-  reason: string | null;
-}
-
-/** Wire-shape (snake_case) of the PaymentIntent returned by capture. */
-interface PaymentIntentWire {
-  id: string;
-  status: PaymentIntent["status"];
-  amount: number;
-  currency: string;
-  capture_method: PaymentIntent["captureMethod"];
-  next_action: string | null;
-  decline_code: string | null;
-  created_at: string;
-  metadata?: Record<string, string>;
-}
-
-interface ErrorWire {
-  error?: string;
-  code?: string;
-  fix?: string;
-  payment_intent?: string;
-  current_status?: string;
-  reject_reason?: string;
-}
-
 /**
- * Raw HTTP call against Vonpay endpoints not yet wrapped by SDK 0.5.0.
- * Matches the SDK's auth + idempotency + Von-Pay-Version conventions so a
- * future migration to `paymentIntents.capture` / `refunds.create` is a
- * one-liner.
+ * Log an error from any step in the lifecycle.
+ *
+ * `VonPayError` carries everything you need to triage a failure without a
+ * follow-up retrieve:
+ *   - `code` / `status` — machine-readable error code + HTTP status
+ *   - `requestId` — paste this when filing a support ticket
+ *   - `currentStatus` + `rejectReason` — populated on `422 invalid_transition`
+ *     from the lifecycle endpoints (capture / void / refund), so you can branch
+ *     (e.g. void → refund) without round-tripping a failed call
+ *   - `nextAction` — programmatic decision helper (fix_input / wait_and_retry / …)
  */
-async function vonpayFetch<T>(
-  path: string,
-  body: Record<string, unknown>,
-  idempotencyKey: string,
-): Promise<T> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${SECRET_KEY}`,
-    "Content-Type": "application/json",
-    Accept: "application/json",
-    "Idempotency-Key": idempotencyKey,
-  };
-
-  const response = await fetch(`${BASE_URL}${path}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  });
-
-  const requestId = response.headers.get("X-Request-Id") ?? "";
-
-  if (!response.ok) {
-    let payload: ErrorWire = {};
-    try {
-      payload = (await response.json()) as ErrorWire;
-    } catch {
-      // Body wasn't JSON — fall through with empty payload.
-    }
-    const err = new Error(
-      `${path} failed: ${response.status} ${payload.code ?? "unknown"} — ${payload.error ?? response.statusText}`,
-    );
-    Object.assign(err, {
-      status: response.status,
-      code: payload.code,
-      requestId,
-      currentStatus: payload.current_status,
-      rejectReason: payload.reject_reason,
-    });
-    throw err;
-  }
-
-  return (await response.json()) as T;
-}
-
 function logError(label: string, err: unknown): void {
   if (err instanceof VonPayError) {
-    // VonPayError (SDK 0.5.0) carries code + status + requestId. Lifecycle
-    // extras (current_status / reject_reason on 422 invalid_transition) come
-    // back from the raw-fetch path below — capture/void/refund aren't yet
-    // wrapped by the SDK.
     console.error(`[${label}] VonPayError`, {
       code: err.code,
       status: err.status,
       requestId: err.requestId,
+      currentStatus: err.currentStatus,
+      rejectReason: err.rejectReason,
+      nextAction: err.nextAction,
       message: err.message,
     });
     return;
   }
   if (err instanceof Error) {
-    const extras = err as Error & {
-      status?: number;
-      code?: string;
-      requestId?: string;
-      currentStatus?: string;
-      rejectReason?: string;
-    };
-    console.error(`[${label}] Error`, {
-      message: extras.message,
-      status: extras.status,
-      code: extras.code,
-      requestId: extras.requestId,
-      currentStatus: extras.currentStatus,
-      rejectReason: extras.rejectReason,
-    });
+    console.error(`[${label}] Error`, { message: err.message });
     return;
   }
   console.error(`[${label}] non-Error thrown`, { type: typeof err, value: String(err) });
@@ -190,13 +108,14 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  let captured: PaymentIntentWire;
+  // Capture the full authorized amount. Omit the params object (or pass
+  // `{ amountToCapture }`) for a partial capture — the server enforces that
+  // remaining = authorized − previous captures.
+  let captured: PaymentIntent;
   try {
-    captured = await vonpayFetch<PaymentIntentWire>(
-      `/v1/payment_intents/${encodeURIComponent(intent.id)}/capture`,
-      {},
-      captureKey,
-    );
+    captured = await vonpay.paymentIntents.capture(intent.id, undefined, {
+      idempotencyKey: captureKey,
+    });
     console.log("captured", {
       id: captured.id,
       status: captured.status,
@@ -207,20 +126,20 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  let refund: RefundWire;
+  // Partial refund. Omit `amount` to refund the full remaining balance.
+  let refund: Refund;
   try {
-    refund = await vonpayFetch<RefundWire>(
-      "/v1/refunds",
+    refund = await vonpay.refunds.create(
       {
-        payment_intent: intent.id,
+        paymentIntent: intent.id,
         amount: 500,
         reason: "customer_requested",
       },
-      refundKey,
+      { idempotencyKey: refundKey },
     );
     console.log("refunded", {
       id: refund.id,
-      paymentIntent: refund.payment_intent,
+      paymentIntent: refund.paymentIntent,
       amount: refund.amount,
       status: refund.status,
     });

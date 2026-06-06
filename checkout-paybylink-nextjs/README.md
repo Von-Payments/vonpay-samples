@@ -3,7 +3,7 @@
 Reference integration for the **pay-by-link** pattern: a merchant operator creates a hosted-checkout session from a dashboard form, shares the resulting `checkoutUrl` as a link or QR code, and watches the status update when the webhook arrives. Same `sessions.create()` surface as the cart → redirect flow, different UX: no cart, no per-buyer client code — the merchant is the one creating the session.
 
 - **Stack:** Next.js 15 App Router, React 19, TypeScript strict
-- **Von Payments SDK:** `@vonpay/checkout-node@0.5.0`
+- **Von Payments SDK:** `@vonpay/checkout-node@^0.9.0`
 - **What it demonstrates:** session creation for asynchronous payment, QR-code rendering, webhook-driven status updates, client-side polling of link status, signed return verification (v1 + v2 auto-detect), security headers (CSP / HSTS / X-Frame-Options)
 
 ## 5-minute setup
@@ -59,20 +59,20 @@ next.config.ts                     — CSP / HSTS / X-Frame-Options / Referrer-P
 
 The `sessions.create()` call is the same one the cart → redirect sample makes — the difference is that here the merchant operator creates the session ahead of time (no buyer cart) and surfaces the URL out-of-band (email, SMS, QR). `cancelUrl` points back at the link detail page so a buyer who bails can resume from the same link.
 
-Webhooks carry an `X-VonPay-Signature` HMAC header. `vonpay.webhooks.constructEvent(rawBody, signature, secretKey, timestamp)` verifies the signature, checks the timestamp is within the ±5-minute replay window, and returns a parsed `WebhookEvent` discriminated union. This sample listens for `session.succeeded`, `session.failed`, and `session.expired` to update the link's status.
+Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header — there is no separate timestamp header). `vonpay.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent` discriminated union. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) — not your API key. This sample listens for `session.succeeded` and `session.failed` to update the link's status.
 
 ## Security notes
 
 - **Always use raw body for webhook verification.** Next.js route handlers give you `req.text()` — use it directly, don't `JSON.parse()` first.
-- **Pin the SDK.** `"latest"` drifts silently; this sample pins `^0.1.3`.
+- **Pin the SDK.** `"latest"` drifts silently; this sample pins `^0.9.0`.
 - **In-memory storage is dev-only.** `lib/storage.ts` uses a `Map` that resets on server restart. In production, persist to Postgres / SQLite / Redis and scope link rows to the authenticated merchant operator.
-- **Secret key and session signing secret are different.** The API key (`vp_sk_*`) signs webhooks. The session signing secret (`ss_*`) signs return-URL redirects. Never swap them — your code will fail open or fail closed in subtle ways.
+- **Three different secrets.** The webhook signing secret (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) signs webhooks. The API key (`vp_sk_*`) authenticates API calls. The session signing secret (`ss_*`) signs return-URL redirects. Never swap them; your code will fail open or fail closed in subtle ways.
 - **Security headers ship in `next.config.ts`.** Remove them only if you have a deliberate reason.
 - **Link URLs are bearer tokens.** Anyone with a `checkoutUrl` can complete the payment on that session. Treat them like one-time tokens: use TLS everywhere, expire them server-side, and don't email them through unencrypted channels.
 
 ## Deploying
 
-1. Set `VON_PAY_SECRET_KEY`, `VON_PAY_SESSION_SECRET`, and `NEXT_PUBLIC_BASE_URL` as environment variables in your host (Vercel, Railway, etc.).
+1. Set `VON_PAY_SECRET_KEY`, `VON_PAY_SESSION_SECRET`, and `NEXT_PUBLIC_BASE_URL` as environment variables in your host (Vercel, Fly.io, AWS, etc.).
 2. Set `NEXT_PUBLIC_BASE_URL` to the production URL of the deployed app — the `successUrl` binding in v2 signatures requires byte-exact canonical URL matching.
 3. Register the webhook at your production `/api/webhooks` URL in `/dashboard/developers/webhooks`. Verify signatures fire correctly via the "Send test event" button in the dashboard.
 4. **Replace `lib/storage.ts` with a real database** before handing this to real merchants.
@@ -81,7 +81,7 @@ Webhooks carry an `X-VonPay-Signature` HMAC header. `vonpay.webhooks.constructEv
 
 A merchant operator who wants to share a checkout link out-of-band (email, SMS, QR code) — invoices, deposits, ad-hoc payment requests. Same `sessions.create()` API as the cart-redirect sample, different distribution shape.
 
-If you're instead building a **platform/CRM connector** integrating Vora into someone else's product, start at the [Platforms integration spec](https://docs.vonpay.com/platforms) and the [Platform Integrator Sandbox guide](https://docs.vonpay.com/guides/platform-sandbox).
+If you're instead building a **platform / CRM connector** integrating Von Payments inside another product, start at the [Platforms integration spec](https://docs.vonpay.com/platforms) and the [Platform Integrator Sandbox guide](https://docs.vonpay.com/guides/platform-sandbox).
 
 ## Related
 

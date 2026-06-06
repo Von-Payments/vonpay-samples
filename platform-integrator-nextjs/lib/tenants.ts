@@ -3,13 +3,18 @@
  * (Postgres, DynamoDB, whatever) and is keyed by an internal merchant
  * ID. Each tenant row stores the merchant's Von Payments credentials.
  *
- * Two columns matter on the platform side:
- *   - vp_sk         — secret API key, used to sign outbound requests
+ * Three columns matter on the platform side:
+ *   - vp_sk         — secret API key, used to authenticate outbound
+ *                     requests (session creation, captures, refunds)
  *   - ss            — session signing secret, used to verify return
  *                     URL signatures when the buyer redirects back
+ *   - whsec         — per-endpoint webhook signing secret, minted when
+ *                     the tenant registers a webhook endpoint in their
+ *                     dashboard. Used to verify inbound webhook
+ *                     signatures. This is NOT the API key.
  *
- * Both should be encrypted at rest. Decryption happens at request time
- * (here: env-var lookup) and is cached for the request scope, not
+ * All three should be encrypted at rest. Decryption happens at request
+ * time (here: env-var lookup) and is cached for the request scope, not
  * across requests.
  *
  * For this sample we simulate 3 onboarded tenants via env vars.
@@ -17,10 +22,12 @@
  */
 
 export interface TenantCredentials {
-  /** The merchant's Von Payments secret API key. */
+  /** The merchant's Von Payments secret API key (`vp_sk_*`). */
   vpSk: string;
-  /** The merchant's Von Payments session signing secret. */
+  /** The merchant's Von Payments session signing secret (`ss_*`). */
   ss: string;
+  /** The merchant's per-endpoint webhook signing secret (`whsec_*`). */
+  webhookSecret: string;
 }
 
 export interface Tenant {
@@ -42,21 +49,24 @@ export const TENANTS: Tenant[] = [
  * Look up the Von Payments credentials for a tenant.
  *
  * In production, this hits your DB. The sample reads from process.env
- * so each tenant maps to a TENANT_{A|B|C}_VP_SK and TENANT_{A|B|C}_SS
- * pair. Throws if the tenant is unknown or credentials are missing.
+ * so each tenant maps to a TENANT_{A|B|C}_VP_SK, TENANT_{A|B|C}_SS, and
+ * TENANT_{A|B|C}_WHSEC triple. Throws if the tenant is unknown or
+ * credentials are missing.
  */
 export function getTenantCredentials(tenantId: string): TenantCredentials {
   const upper = tenantId.replace(/^tenant_/, "").toUpperCase();
   const vpSk = process.env[`TENANT_${upper}_VP_SK`];
   const ss = process.env[`TENANT_${upper}_SS`];
+  const webhookSecret = process.env[`TENANT_${upper}_WHSEC`];
 
-  if (!vpSk || !ss) {
+  if (!vpSk || !ss || !webhookSecret) {
     throw new Error(
       `No credentials configured for tenant '${tenantId}'. ` +
-        `Set TENANT_${upper}_VP_SK and TENANT_${upper}_SS in .env.local.`,
+        `Set TENANT_${upper}_VP_SK, TENANT_${upper}_SS, and ` +
+        `TENANT_${upper}_WHSEC in .env.local.`,
     );
   }
-  return { vpSk, ss };
+  return { vpSk, ss, webhookSecret };
 }
 
 export function getTenant(tenantId: string): Tenant | undefined {

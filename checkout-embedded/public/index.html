@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Von Payments — Embedded checkout (VORA Mirror)</title>
+
+    <!--
+      VORA Mirror browser SDK, loaded from the CDN.
+
+      This is the supported delivery channel for the browser SDK — there is
+      no public npm package to install. The script attaches a global `Vora`
+      constructor to `window`. The /v1/ channel auto-updates within the v1
+      major; pin a specific version with Subresource Integrity for stricter
+      supply-chain control (see README → "Pinning the SDK version").
+    -->
+    <script
+      src="https://js.vonpay.com/v1/vora.js"
+      crossorigin="anonymous"
+    ></script>
+    <!--
+      No `integrity` attribute above because the /v1/ channel is mutable (it
+      auto-ships patch updates), so a fixed SRI hash would break on every
+      release. For stricter supply-chain control, pin a specific immutable
+      version and add its SRI hash instead — the published hash is on the docs
+      page. Example (replace the version + hash with the current published one):
+
+      <script
+        src="https://js.vonpay.com/v1.3.3/vora.js"
+        integrity="sha384-REPLACE_WITH_PUBLISHED_HASH"
+        crossorigin="anonymous"
+      ></script>
+    -->
+    <noscript>This embedded checkout requires JavaScript.</noscript>
+
+    <style>
+      :root {
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        line-height: 1.5;
+        color: #1f2937;
+      }
+      body {
+        max-width: 480px;
+        margin: 2.5rem auto;
+        padding: 0 1rem;
+      }
+      h1 {
+        font-size: 1.4rem;
+      }
+      .card-mount {
+        margin: 0.75rem 0;
+        padding: 0.75rem;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        min-height: 2.75rem;
+      }
+      button#pay {
+        width: 100%;
+        padding: 0.75rem 1rem;
+        font-size: 1rem;
+        font-weight: 600;
+        color: #fff;
+        background: #1f2937;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      button#pay:disabled {
+        background: #9ca3af;
+        cursor: not-allowed;
+      }
+      .status {
+        margin-top: 1rem;
+        padding: 0.75rem;
+        border-radius: 6px;
+        font-size: 0.9rem;
+        display: none;
+      }
+      .status.show {
+        display: block;
+      }
+      .status.error {
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        color: #991b1b;
+      }
+      .status.success {
+        background: #f0fdf4;
+        border: 1px solid #bbf7d0;
+        color: #14532d;
+      }
+      .status.pending {
+        background: #fffbeb;
+        border: 1px solid #fde68a;
+        color: #78350f;
+      }
+      .test-cards {
+        margin-top: 2rem;
+        font-size: 0.85rem;
+        color: #4b5563;
+      }
+      .test-cards code {
+        background: #f3f4f6;
+        padding: 0.1rem 0.3rem;
+        border-radius: 3px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h1>Von Payments — Embedded checkout</h1>
+    <p>
+      The card field below is rendered inside a Von Payments-owned iframe
+      (VORA Mirror). Card data never touches this page or its server.
+    </p>
+
+    <form id="checkout-form" autocomplete="off">
+      <label for="card-element">Card details</label>
+      <!-- The card iframe is mounted here by the SDK. -->
+      <div id="card-element" class="card-mount"></div>
+
+      <button id="pay" type="submit" disabled>Pay $49.99</button>
+    </form>
+
+    <div id="status" class="status"></div>
+
+    <div class="test-cards">
+      <strong>Sandbox test cards</strong> (any future expiry, any 3-digit CVC):
+      <ul>
+        <li><code>4242 4242 4242 4242</code> — succeeds, no 3DS challenge</li>
+        <li>
+          <code>4000 0025 0000 3155</code> — 3DS challenge, succeeds after auth
+        </li>
+        <li><code>4000 0000 0000 9995</code> — tokenizes, then declines at charge</li>
+      </ul>
+    </div>
+
+    <script type="module" src="/checkout.js"></script>
+  </body>
+</html>

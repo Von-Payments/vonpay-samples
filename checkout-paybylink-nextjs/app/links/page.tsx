@@ -153,7 +153,6 @@ function StatusBadge({ status }: { status: string }) {
     pending: "#666",
     paid: "#0a7a2f",
     failed: "#b00020",
-    expired: "#855",
   };
   return <span style={{ color: colors[status] ?? "#333", fontWeight: 600 }}>{status}</span>;
 }

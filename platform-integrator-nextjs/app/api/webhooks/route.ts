@@ -13,38 +13,37 @@ import {
  * field — the platform routes the event back to the right tenant by
  * looking up the merchantId in its DB.
  *
- * Signature verification model: each merchant signs with THEIR OWN
- * vp_sk_* secret. So the verifier needs the right key for the right
- * event. The challenge: we need to know which tenant this event
- * belongs to *before* we can verify the signature.
+ * Signature model: each webhook endpoint is signed with the per-endpoint
+ * `whsec_*` secret minted when that endpoint is registered in the
+ * dashboard — NOT your API key. Each of your tenants registers their own
+ * webhook endpoint in their own dashboard, so each tenant has their own
+ * `whsec_*`. The verifier therefore needs the right `whsec_*` for the
+ * right event. The challenge: we need to know which tenant this event
+ * belongs to *before* we can pick the right secret to verify with.
  *
- * Solution today (Webhooks v1):
+ * Solution:
  *   1. Parse the body as JSON without verifying (read-only)
  *   2. Extract merchantId from the parsed payload
- *   3. Look up the tenant + their vp_sk
- *   4. Verify the signature using that vp_sk against the RAW body
- *   5. If valid: process the event. If invalid: 401.
+ *   3. Look up the tenant + their `whsec_*` endpoint secret
+ *   4. Verify the signature using that `whsec_*` against the RAW body
+ *   5. If valid: process the event. If invalid: 400.
  *
  * The body parse in step 1 is a read; we don't act on the data until
  * step 4 confirms it's authentic. This is safe because parsing JSON
  * doesn't have side effects.
  *
- * (Subscription-level webhooks signed with `whsec_*` per-subscription
- * secrets are also live — registered at app.vonpay.com/dashboard/
- * developers/webhooks. That surface uses a different signature header
- * format and keys the secret by subscription ID rather than per-merchant
- * API key. See the webhooks-node sample for a receiver covering both.)
+ * The signed timestamp lives INSIDE the `x-vonpay-signature` header
+ * (`t=<unix>,v1=<hex>`) — there is no separate timestamp header, and
+ * `constructEvent` takes 3 args: (rawBody, signatureHeader, secret).
  */
 
 // Idempotency: in-memory cache for this process. Replace with Redis or
 // equivalent in production — webhook deliveries can hit multiple
 // instances and you must dedupe across them.
 //
-// Session-level webhook payloads don't carry a top-level event id; we
-// compose one from sessionId + event-type + timestamp, which is unique
-// per delivery. Subscription-level webhooks (whsec_*-signed) carry a
-// dedicated event id you can use directly — see the webhooks-node
-// sample.
+// We compose a dedup key from sessionId + event-type + timestamp, which
+// is unique per delivery for the typed event shape returned by
+// constructEvent.
 const seenEventKeys = new Map<string, number>();
 const SEEN_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
@@ -60,10 +59,10 @@ function dedupe(eventKey: string): boolean {
 }
 
 export async function POST(req: NextRequest) {
-  // Read raw body — required for HMAC verification.
+  // Read raw body — required for HMAC verification. Capture this BEFORE
+  // JSON parsing; re-serialized JSON will not match the signature.
   const rawBody = await req.text();
   const signature = req.headers.get("x-vonpay-signature") ?? "";
-  const timestamp = req.headers.get("x-vonpay-timestamp") ?? "";
 
   // Step 1+2: peek at the payload to find merchantId. We're NOT
   // trusting the data yet — just routing.
@@ -82,25 +81,37 @@ export async function POST(req: NextRequest) {
   const tenant = findTenantByVonPayMerchantId(peekedMerchantId);
   if (!tenant) {
     // Unknown merchant — possibly a misconfigured webhook URL or a
-    // merchant we offboarded. Log + 200 (so VonPay doesn't keep
-    // retrying forever) but don't process.
-    console.warn(`Webhook for unknown merchant '${peekedMerchantId}' — ignoring`);
+    // merchant we offboarded. Log + 200 (so Von Payments doesn't keep
+    // retrying forever) but don't process. `peekedMerchantId` comes from the
+    // UNVERIFIED body — sanitize before logging so a crafted payload can't
+    // inject newlines/escape sequences into the log stream.
+    const safeMerchantId = peekedMerchantId.replace(/[^\w-]/g, "?").slice(0, 64);
+    console.warn(`Webhook for unknown merchant '${safeMerchantId}' — ignoring`);
     return NextResponse.json({ received: true, routed: false });
   }
-  const { vpSk } = getTenantCredentials(tenant.id);
+  const { vpSk, webhookSecret } = getTenantCredentials(tenant.id);
 
-  // Step 4: verify against the tenant's key, using the SDK's
-  // constructEvent which throws on signature mismatch.
+  // Step 4: verify against the tenant's endpoint secret (whsec_*), using
+  // the SDK's constructEvent which throws on signature mismatch, stale
+  // timestamp, or malformed header. The SDK client is instantiated with
+  // the tenant's API key so its error reporter is tenant-scoped; the
+  // signature itself is checked against the whsec_* endpoint secret.
   const vonpay = new VonPayCheckout(vpSk);
   let event;
   try {
-    event = vonpay.webhooks.constructEvent(rawBody, signature, vpSk, timestamp);
+    event = vonpay.webhooks.constructEvent(rawBody, signature, webhookSecret);
   } catch (err) {
-    console.error(`Webhook signature verification failed for tenant ${tenant.id}:`, err);
-    return NextResponse.json({ error: "invalid_signature" }, { status: 401 });
+    // Log only err.message — passing the full err object to a structured
+    // logger may serialize signature / HMAC bytes from the VonPayError's
+    // diagnostic fields. We never want those in stdout.
+    console.error(
+      `Webhook signature verification failed for tenant ${tenant.id}:`,
+      err instanceof Error ? err.message : String(err),
+    );
+    return NextResponse.json({ error: "invalid_signature" }, { status: 400 });
   }
 
-  // Idempotency dedupe — events can be retried by VonPay; we should
+  // Idempotency dedupe — events can be retried by Von Payments; we should
   // process each unique event at most once. Composite key from
   // sessionId + event-type + timestamp.
   const eventKey = `${event.sessionId}:${event.event}:${event.timestamp}`;
@@ -112,26 +123,33 @@ export async function POST(req: NextRequest) {
   // Step 5: process the event for the right tenant. This is where the
   // platform updates its own data model — mark the order paid, send
   // a receipt, post to the merchant's outbound webhook, etc.
-  console.log(
-    `[${tenant.name}] webhook received: ${event.event} for session ${event.sessionId}`,
-  );
+  //
+  // Session IDs are deep-link tokens — keep them out of general
+  // application logs and only surface in systems with the same trust
+  // boundary as the API key itself.
+  console.log(`[${tenant.name}] webhook received: ${event.event}`);
 
   switch (event.event) {
     case "session.succeeded":
-      // TODO: update your CRM's `orders` row → status=paid
-      // TODO: trigger any downstream effects (fulfillment, receipt, etc.)
+      // Buyer actually paid. Update your CRM's `orders` row → status=paid
+      // and trigger any downstream effects (fulfillment, receipt, etc.).
+      // `event.sessionId` + `event.transactionId` are available here;
+      // pass them to your systems but avoid logging them verbatim.
       break;
     case "session.failed":
-      // TODO: update your CRM's `orders` row → status=failed
-      // TODO: surface the failure in your platform's UI
-      break;
-    case "session.expired":
-      // TODO: clean up the pending order; possibly retry
+      // Payment did not complete — do NOT fulfill. Update your CRM's
+      // `orders` row → status=failed and surface it in your platform UI.
       break;
     case "refund.created":
-      // TODO: update your CRM's order/transaction → refunded
+      // Update your CRM's order/transaction → refunded.
+      // `event.refundId` identifies the refund.
+      break;
+    default:
+      // Unknown event type — ack 200 but take no action.
       break;
   }
 
-  return NextResponse.json({ received: true, tenant: tenant.id });
+  // Ack with a bare 200 — the delivery engine only needs to know we received
+  // it. Don't echo the internal tenant id back to a third party.
+  return NextResponse.json({ received: true });
 }

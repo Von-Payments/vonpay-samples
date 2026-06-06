@@ -10,6 +10,9 @@ app = Flask(__name__)
 
 API_KEY = os.environ["VON_PAY_SECRET_KEY"]
 SESSION_SECRET = os.environ["VON_PAY_SESSION_SECRET"]
+# Per-endpoint webhook signing secret (whsec_…), shown once when you create the
+# webhook endpoint. This is NOT your API key.
+WEBHOOK_SECRET = os.environ["VON_PAY_WEBHOOK_SECRET"]
 BASE_URL = os.environ["BASE_URL"].rstrip("/")
 
 checkout = VonPayCheckout(API_KEY)
@@ -37,16 +40,34 @@ def create_checkout():
 @app.post("/webhooks")
 def webhooks():
     body = request.get_data(as_text=True)
+    # The signed timestamp lives inside the signature header (t=,v1=) — there
+    # is no separate timestamp header.
     signature = request.headers.get("X-VonPay-Signature", "")
-    timestamp = request.headers.get("X-VonPay-Timestamp", "")
 
     try:
-        event = checkout.webhooks.construct_event(body, signature, API_KEY, timestamp)
-        print(f"Webhook: {event.event} — session {event.session_id}")
-        return jsonify({"received": True})
+        event = checkout.webhooks.construct_event(body, signature, WEBHOOK_SECRET)
     except VonPayError as e:
         print(f"Webhook verification failed: {e.code}")
-        return jsonify({"error": "invalid_signature"}), 401
+        # 400 (not 401): the request is malformed/unverifiable, not an auth
+        # challenge. Every other sample returns 400 here and the delivery
+        # engine treats 4xx as a non-retryable bad request.
+        return jsonify({"error": "invalid_signature"}), 400
+
+    # Branch on event type. Only `session.succeeded` means the buyer actually paid;
+    # do NOT fulfill orders on `session.failed`. Session IDs
+    # are deep-link tokens — keep them out of general application logs and only
+    # surface in systems with the same trust boundary as the API key itself.
+    if event.event == "session.succeeded":
+        # Replace this with your order-fulfillment logic. `event.session_id` and
+        # `event.transaction_id` are available here; pass them to your
+        # fulfillment system but avoid logging them verbatim.
+        pass
+    elif event.event == "session.failed":
+        # Payment did not complete — do not fulfill.
+        pass
+    # Unknown event types — accept the webhook (ack 200) but take no action.
+
+    return jsonify({"received": True})
 
 
 @app.get("/success")
@@ -75,4 +96,4 @@ def health():
 
 
 if __name__ == "__main__":
-    app.run(port=int(os.environ.get("PORT", "3000")), debug=os.environ.get("FLASK_DEBUG", "false").lower() == "true")
+    app.run(port=int(os.environ.get("PORT", "5000")), debug=os.environ.get("FLASK_DEBUG", "false").lower() == "true")
