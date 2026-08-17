@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
   // do NOT fulfill orders on `session.failed`. Session IDs
   // are deep-link tokens — keep them out of general application logs and only
   // surface in systems with the same trust boundary as the API key itself.
-  switch (event.event) {
+  switch (event.type) {
     case "session.succeeded":
       // Replace this with your order-fulfillment logic. `event.sessionId` and
       // `event.transactionId` are available here; pass them to your

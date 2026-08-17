@@ -23,10 +23,10 @@ export async function POST(req: NextRequest) {
 
     let nextStatus: LinkStatus | undefined;
     let transactionId: string | undefined;
-    if (event.event === "session.succeeded") {
+    if (event.type === "session.succeeded") {
       nextStatus = "paid";
       transactionId = event.transactionId;
-    } else if (event.event === "session.failed") {
+    } else if (event.type === "session.failed") {
       nextStatus = "failed";
     }
 
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
       // Log only the merchant-side identifiers (link id + status). Vonpay
       // session IDs are deep-link tokens — keep them out of general logs.
       console.log(
-        `webhook ${event.event} →`,
+        `webhook ${event.type} →`,
         updated ? `link ${updated.id} → ${nextStatus}` : "(no matching link)",
       );
     }

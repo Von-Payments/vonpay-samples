@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
   // Idempotency dedupe — events can be retried by Von Payments; we should
   // process each unique event at most once. Composite key from
   // sessionId + event-type + timestamp.
-  const eventKey = `${event.sessionId}:${event.event}:${event.timestamp}`;
+  const eventKey = `${event.sessionId}:${event.type}:${event.timestamp}`;
   if (!dedupe(eventKey)) {
     console.log(`Duplicate webhook ${eventKey} for tenant ${tenant.id} — skipping`);
     return NextResponse.json({ received: true, deduped: true });
@@ -127,9 +127,9 @@ export async function POST(req: NextRequest) {
   // Session IDs are deep-link tokens — keep them out of general
   // application logs and only surface in systems with the same trust
   // boundary as the API key itself.
-  console.log(`[${tenant.name}] webhook received: ${event.event}`);
+  console.log(`[${tenant.name}] webhook received: ${event.type}`);
 
-  switch (event.event) {
+  switch (event.type) {
     case "session.succeeded":
       // Buyer actually paid. Update your CRM's `orders` row → status=paid
       // and trigger any downstream effects (fulfillment, receipt, etc.).

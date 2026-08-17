@@ -63,7 +63,7 @@ app.post("/webhooks", (req, res) => {
   // do NOT fulfill orders on `session.failed`. Session IDs
   // are deep-link tokens — keep them out of general application logs and only
   // surface in systems with the same trust boundary as the API key itself.
-  switch (event.event) {
+  switch (event.type) {
     case "session.succeeded":
       // Replace this with your order-fulfillment logic. `event.sessionId` and
       // `event.transactionId` are available here; pass them to your
@@ -81,18 +81,69 @@ app.post("/webhooks", (req, res) => {
 });
 
 // ── Success return page ──────────────────────────────────────────────
-app.get("/success", (req, res) => {
+app.get("/success", async (req, res) => {
   const params = req.query as Record<string, string>;
 
-  // v2 signatures require expectedSuccessUrl + expectedKeyMode; v1 ignores these options.
-  // SDK auto-detects the format from params.sig prefix.
-  const valid = VonPayCheckout.verifyReturnSignature(params, sessionSecret, {
-    expectedSuccessUrl: `http://localhost:${port}/success`,
-    expectedKeyMode: apiKey.includes("_test_") ? "test" : "live",
-    maxAgeSeconds: 600,
-  });
-  if (!valid) {
+  // `confirmReturn` verifies the signature AND confirms server-side that the
+  // payment actually succeeded.
+  //
+  // ⚠️ Do NOT use `verifyReturnSignature` here and treat its `true` as proof of
+  // payment. It proves the message is AUTHENTIC — a DECLINED payment is signed
+  // just as authentically as an approved one. This page used to render
+  // "Payment successful" on signature validity alone, which meant deliberately
+  // paying with a card you knew would decline produced a valid "success" page.
+  //
+  // The webhook handler above already had this guard; the return handler did
+  // not. Note that it is the WEBHOOK that should trigger fulfilment — buyers
+  // close laptops and never load this page.
+  let outcome;
+  try {
+    outcome = await vonpay.sessions.confirmReturn(params, sessionSecret, {
+      expectedSuccessUrl: `http://localhost:${port}/success`,
+      expectedKeyMode: apiKey.includes("_test_") ? "test" : "live",
+      maxAgeSeconds: 600,
+    });
+  } catch (err) {
+    // The lookup failed — we could not check. That is NOT "they did not pay",
+    // so do not tell the buyer their payment failed.
+    //
+    // Log it. A revoked key or a rate-limit block would otherwise show every
+    // buyer "please refresh in a moment" forever with nothing in your logs —
+    // a permanent failure wearing the costume of a temporary one.
+    console.error(
+      "Return confirmation failed:",
+      err instanceof Error ? err.message : String(err),
+    );
+    res
+      .status(503)
+      .send("<h1>We could not confirm your payment just now</h1>" +
+            "<p>No action needed — if you were charged, your order is safe. " +
+            "Please refresh in a moment.</p>");
+    return;
+  }
+
+  if (!outcome.signatureValid) {
     res.status(400).send("<h1>Invalid return signature</h1>");
+    return;
+  }
+
+  // ⚠️ IN FLIGHT is not DECLINED. On the 3-D Secure path the buyer is returned
+  // here BEFORE the charge settles, so this is the ordinary case there — not an
+  // edge case. Telling this buyer their payment failed is how they end up
+  // paying twice. Never a 402, never a retry affordance; the webhook settles it.
+  if (outcome.reason === "still_pending") {
+    res
+      .status(200)
+      .send("<h1>Confirming your payment…</h1>" +
+            "<p>Your bank is still finishing this off. You do not need to pay " +
+            "again — we'll email you as soon as it completes.</p>");
+    return;
+  }
+
+  if (!outcome.paid) {
+    res
+      .status(402)
+      .send(`<h1>Payment not completed</h1><p>Status: ${esc(outcome.status ?? "unknown")}</p>`);
     return;
   }
 
@@ -101,10 +152,14 @@ app.get("/success", (req, res) => {
     ? (minorAmount / 100).toFixed(2)
     : params.amount;
 
+  // ⚠️ Displaying a confirmation is safe to repeat. FULFILLING is not — this
+  // URL can be replayed, and the status keeps reading "succeeded" every time.
+  // Before shipping goods, record which session IDs you have already fulfilled
+  // and refuse to fulfil one twice. Fulfil from the webhook, not from here.
   res.send(`
     <h1>Payment successful</h1>
     <p>Session: ${esc(params.session)}</p>
-    <p>Status: ${esc(params.status)}</p>
+    <p>Status: ${esc(outcome.status ?? "")}</p>
     <p>Amount: ${esc(displayAmount)} ${esc(params.currency)}</p>
     <p>Transaction: ${esc(params.transaction_id ?? "N/A")}</p>
   `);

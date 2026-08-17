@@ -4,7 +4,7 @@ import os
 
 from flask import Flask, redirect, request, jsonify
 from markupsafe import escape
-from vonpay.checkout import VonPayCheckout, VonPayError
+from vonpay.checkout import VonPayCheckout, VonPayError, VonPayError
 
 app = Flask(__name__)
 
@@ -57,12 +57,12 @@ def webhooks():
     # do NOT fulfill orders on `session.failed`. Session IDs
     # are deep-link tokens — keep them out of general application logs and only
     # surface in systems with the same trust boundary as the API key itself.
-    if event.event == "session.succeeded":
+    if event.type == "session.succeeded":
         # Replace this with your order-fulfillment logic. `event.session_id` and
         # `event.transaction_id` are available here; pass them to your
         # fulfillment system but avoid logging them verbatim.
         pass
-    elif event.event == "session.failed":
+    elif event.type == "session.failed":
         # Payment did not complete — do not fulfill.
         pass
     # Unknown event types — accept the webhook (ack 200) but take no action.
@@ -73,20 +73,70 @@ def webhooks():
 @app.get("/success")
 def success():
     params = dict(request.args)
-    # v2 signatures require expected_success_url + expected_key_mode; v1 ignores these options.
-    # SDK auto-detects the format from params.sig prefix.
     expected_mode = "test" if "_test_" in API_KEY else "live"
-    if VonPayCheckout.verify_return_signature(
-        params,
-        SESSION_SECRET,
-        expected_success_url=f"{BASE_URL}/success",
-        expected_key_mode=expected_mode,
-        max_age_seconds=600,
-    ):
-        status = escape(params.get("status", "unknown"))
-        session = escape(params.get("session", ""))
-        return f"<h1>Payment {status}</h1><p>Session: {session}</p>"
-    return "<h1>Invalid signature</h1>", 400
+
+    # `confirm_return` verifies the signature AND confirms server-side that the
+    # payment actually succeeded.
+    #
+    # ⚠️ Do NOT use `verify_return_signature` here and treat its True as proof
+    # of payment. It proves the message is AUTHENTIC — a DECLINED payment is
+    # signed just as authentically as an approved one. This page used to render
+    # "Payment <status>" straight from the URL without gating on it, so
+    # deliberately paying with a card you knew would decline still produced a
+    # signature-valid page.
+    #
+    # The webhook handler above already had this guard; this one did not. Note
+    # that it is the WEBHOOK that should trigger fulfilment — buyers close
+    # laptops and never load this page.
+    try:
+        outcome = checkout.sessions.confirm_return(
+            params,
+            SESSION_SECRET,
+            expected_success_url=f"{BASE_URL}/success",
+            expected_key_mode=expected_mode,
+            max_age_seconds=600,
+        )
+    except VonPayError as e:
+        # The lookup failed — we could not check. That is NOT "they did not
+        # pay", so do not tell the buyer their payment failed.
+        #
+        # Log it. A revoked key or a rate-limit block would otherwise show every
+        # buyer "please refresh in a moment" forever with nothing in your logs —
+        # a permanent failure wearing the costume of a temporary one.
+        app.logger.error("Return confirmation failed: %s", e.code)
+        return (
+            "<h1>We could not confirm your payment just now</h1>"
+            "<p>No action needed — if you were charged, your order is safe. "
+            "Please refresh in a moment.</p>",
+            503,
+        )
+
+    if not outcome.signature_valid:
+        return "<h1>Invalid signature</h1>", 400
+
+    # ⚠️ IN FLIGHT is not DECLINED. On the 3-D Secure path the buyer is returned
+    # here BEFORE the charge settles, so this is the ordinary case there — not
+    # an edge case. Telling this buyer their payment failed is how they end up
+    # paying twice. Never a 402, never a retry affordance; the webhook settles it.
+    if outcome.reason == "still_pending":
+        return (
+            "<h1>Confirming your payment…</h1>"
+            "<p>Your bank is still finishing this off. You do not need to pay "
+            "again — we'll email you as soon as it completes.</p>",
+            200,
+        )
+
+    if not outcome.paid:
+        status = escape(outcome.status or "unknown")
+        return f"<h1>Payment not completed</h1><p>Status: {status}</p>", 402
+
+    # ⚠️ Displaying a confirmation is safe to repeat. FULFILLING is not — this
+    # URL can be replayed, and the status keeps reading "succeeded" every time.
+    # Before shipping goods, record which session IDs you have already fulfilled
+    # and refuse to fulfil one twice. Fulfil from the webhook, not from here.
+    session = escape(outcome.session_id or "")
+    status = escape(outcome.status or "")
+    return f"<h1>Payment {status}</h1><p>Session: {session}</p>"
 
 
 @app.get("/health")

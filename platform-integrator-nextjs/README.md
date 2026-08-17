@@ -115,7 +115,7 @@ The signature is verified using the **tenant's** per-endpoint `whsec_*` secret (
 ### Idempotent event processing
 
 ```typescript
-const eventKey = `${event.sessionId}:${event.event}:${event.timestamp}`;
+const eventKey = `${event.sessionId}:${event.type}:${event.timestamp}`;
 if (!dedupe(eventKey)) {
   return NextResponse.json({ received: true, deduped: true });
 }

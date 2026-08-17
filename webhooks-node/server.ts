@@ -109,11 +109,11 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
   // retry does not double-fulfill. We key on `(event, sessionId)`; the discrete
   // event id is available on the stored record via webhookEvents.retrieve if
   // you need a globally-unique key.
-  const dedupeKey = `${event.event}:${event.sessionId}`;
+  const dedupeKey = `${event.type}:${event.sessionId}`;
   const isFirstDelivery = markHandled(dedupeKey);
 
   try {
-    switch (event.event) {
+    switch (event.type) {
       case "session.succeeded":
         // → fulfill the order, send the receipt, mark the order paid in your DB.
         // Only `session.succeeded` means the buyer actually paid. Session and
@@ -122,7 +122,7 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
         console.log({
           level: "info",
           route: "/webhooks/vonpay",
-          event: event.event,
+          event: event.type,
           merchantId: event.merchantId,
           amount: event.amount,
           currency: event.currency,
@@ -135,7 +135,7 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
         console.log({
           level: "info",
           route: "/webhooks/vonpay",
-          event: event.event,
+          event: event.type,
           merchantId: event.merchantId,
           error: event.error,
           failureCode: event.failureCode,
@@ -147,7 +147,7 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
         console.log({
           level: "info",
           route: "/webhooks/vonpay",
-          event: event.event,
+          event: event.type,
           merchantId: event.merchantId,
           refundId: event.refundId,
           amount: event.amount,
