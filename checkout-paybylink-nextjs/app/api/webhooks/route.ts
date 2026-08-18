@@ -23,16 +23,16 @@ export async function POST(req: NextRequest) {
 
     let nextStatus: LinkStatus | undefined;
     let transactionId: string | undefined;
-    let sessionId: string | null = null;
+    let sessionId: string | undefined;
+    // Every field on `event.data` is nullable — the processor does not always
+    // report one. Coerce to `undefined` rather than storing a literal null.
     if (event.type === "session.succeeded") {
       nextStatus = "paid";
-      // Every field on `event.data` is nullable — the processor does not always
-      // report one. Coerce to `undefined` rather than storing a literal null.
       transactionId = event.data.transaction_id ?? undefined;
-      sessionId = event.data.session_id;
+      sessionId = event.data.session_id ?? undefined;
     } else if (event.type === "session.failed") {
       nextStatus = "failed";
-      sessionId = event.data.session_id;
+      sessionId = event.data.session_id ?? undefined;
     }
 
     // Without a session id there is nothing to match a link against. Ack the

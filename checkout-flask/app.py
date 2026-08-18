@@ -4,7 +4,7 @@ import os
 
 from flask import Flask, redirect, request, jsonify
 from markupsafe import escape
-from vonpay.checkout import VonPayCheckout, VonPayError, VonPayError
+from vonpay.checkout import VonPayCheckout, VonPayError
 
 app = Flask(__name__)
 
@@ -48,9 +48,10 @@ def webhooks():
         event = checkout.webhooks.construct_event(body, signature, WEBHOOK_SECRET)
     except VonPayError as e:
         print(f"Webhook verification failed: {e.code}")
-        # 400 (not 401): the request is malformed/unverifiable, not an auth
-        # challenge. Every other sample returns 400 here and the delivery
-        # engine treats 4xx as a non-retryable bad request.
+        # 400, not 401: the request is malformed or unverifiable, not an auth
+        # challenge — there is no credential the caller could supply to retry
+        # successfully. Every other sample returns 400 here, and the delivery
+        # engine treats 4xx as a non-retryable bad request either way.
         return jsonify({"error": "invalid_signature"}), 400
 
     # Branch on event type. Only `session.succeeded` means the buyer actually paid;
@@ -58,8 +59,8 @@ def webhooks():
     # are deep-link tokens — keep them out of general application logs and only
     # surface in systems with the same trust boundary as the API key itself.
     if event.type == "session.succeeded":
-        # Replace this with your order-fulfillment logic. `event.session_id` and
-        # `event.transaction_id` are available here; pass them to your
+        # Replace this with your order-fulfillment logic. `event.data.session_id`
+        # and `event.data.transaction_id` are available here; pass them to your
         # fulfillment system but avoid logging them verbatim.
         pass
     elif event.type == "session.failed":
