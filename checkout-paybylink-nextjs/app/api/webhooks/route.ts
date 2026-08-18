@@ -23,15 +23,23 @@ export async function POST(req: NextRequest) {
 
     let nextStatus: LinkStatus | undefined;
     let transactionId: string | undefined;
+    let sessionId: string | null = null;
     if (event.type === "session.succeeded") {
       nextStatus = "paid";
-      transactionId = event.transactionId;
+      // Every field on `event.data` is nullable — the processor does not always
+      // report one. Coerce to `undefined` rather than storing a literal null.
+      transactionId = event.data.transaction_id ?? undefined;
+      sessionId = event.data.session_id;
     } else if (event.type === "session.failed") {
       nextStatus = "failed";
+      sessionId = event.data.session_id;
     }
 
-    if (nextStatus) {
-      const updated = updateStatus(event.sessionId, nextStatus, transactionId);
+    // Without a session id there is nothing to match a link against. Ack the
+    // delivery anyway — retrying cannot conjure the field, and a 5xx here would
+    // just loop the delivery engine forever.
+    if (nextStatus && sessionId) {
+      const updated = updateStatus(sessionId, nextStatus, transactionId);
       // Log only the merchant-side identifiers (link id + status). Vonpay
       // session IDs are deep-link tokens — keep them out of general logs.
       console.log(

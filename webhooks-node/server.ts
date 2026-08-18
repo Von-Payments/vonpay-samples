@@ -106,10 +106,14 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
 
   // Idempotency guard. A redelivery (after a transient 5xx, a manual resend, or
   // during a secret rotation) carries the same logical event — dedupe so a
-  // retry does not double-fulfill. We key on `(event, sessionId)`; the discrete
-  // event id is available on the stored record via webhookEvents.retrieve if
-  // you need a globally-unique key.
-  const dedupeKey = `${event.type}:${event.sessionId}`;
+  // retry does not double-fulfill.
+  //
+  // Dedupe on `event.id` (`vp_evt_*`), which is unique per outbound event. Do
+  // NOT build a composite key from the payload: one money movement can emit
+  // more than one event (e.g. a charge event and a session event for the same
+  // payment), so a payload-derived key can collapse two distinct events into
+  // one and silently drop the second.
+  const dedupeKey = event.id;
   const isFirstDelivery = markHandled(dedupeKey);
 
   try {
@@ -123,9 +127,9 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
           level: "info",
           route: "/webhooks/vonpay",
           event: event.type,
-          merchantId: event.merchantId,
-          amount: event.amount,
-          currency: event.currency,
+          merchantId: event.merchant_id,
+          amount: event.data.amount,
+          currency: event.data.currency,
           replay: !isFirstDelivery,
         });
         break;
@@ -136,22 +140,25 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
           level: "info",
           route: "/webhooks/vonpay",
           event: event.type,
-          merchantId: event.merchantId,
-          error: event.error,
-          failureCode: event.failureCode,
+          merchantId: event.merchant_id,
+          error: event.data.failure_reason,
+          failureCode: event.data.failure_code,
           replay: !isFirstDelivery,
         });
         break;
-      case "refund.created":
+      case "charge.refunded":
         // → reverse fulfillment, post a credit memo, notify the buyer.
+        // `is_partial` distinguishes a partial refund from a full one — do not
+        // reverse the whole order on a partial.
         console.log({
           level: "info",
           route: "/webhooks/vonpay",
           event: event.type,
-          merchantId: event.merchantId,
-          refundId: event.refundId,
-          amount: event.amount,
-          currency: event.currency,
+          merchantId: event.merchant_id,
+          refundId: event.data.refund_id,
+          amount: event.data.amount,
+          currency: event.data.currency,
+          isPartial: event.data.is_partial,
           replay: !isFirstDelivery,
         });
         break;
@@ -163,7 +170,7 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
           level: "info",
           route: "/webhooks/vonpay",
           msg: "unknown_event_ignored",
-          event: (event as { event: string }).event,
+          event: event.type,
         });
     }
   } catch (handlerErr) {
