@@ -112,9 +112,11 @@ export async function POST(req: NextRequest) {
   }
 
   // Idempotency dedupe — events can be retried by Von Payments; we should
-  // process each unique event at most once. Composite key from
-  // sessionId + event-type + timestamp.
-  const eventKey = `${event.sessionId}:${event.event}:${event.timestamp}`;
+  // process each unique event at most once. `event.id` (`vp_evt_*`) is unique
+  // per outbound event, so it is the whole key. Do NOT compose one from the
+  // payload: a single money movement can emit more than one event, and a
+  // payload-derived key can collapse two distinct events into one.
+  const eventKey = event.id;
   if (!dedupe(eventKey)) {
     console.log(`Duplicate webhook ${eventKey} for tenant ${tenant.id} — skipping`);
     return NextResponse.json({ received: true, deduped: true });
@@ -127,22 +129,25 @@ export async function POST(req: NextRequest) {
   // Session IDs are deep-link tokens — keep them out of general
   // application logs and only surface in systems with the same trust
   // boundary as the API key itself.
-  console.log(`[${tenant.name}] webhook received: ${event.event}`);
+  console.log(`[${tenant.name}] webhook received: ${event.type}`);
 
-  switch (event.event) {
+  switch (event.type) {
     case "session.succeeded":
       // Buyer actually paid. Update your CRM's `orders` row → status=paid
       // and trigger any downstream effects (fulfillment, receipt, etc.).
-      // `event.sessionId` + `event.transactionId` are available here;
-      // pass them to your systems but avoid logging them verbatim.
+      // `event.data.session_id` + `event.data.transaction_id` are available
+      // here; pass them to your systems but avoid logging them verbatim.
       break;
     case "session.failed":
       // Payment did not complete — do NOT fulfill. Update your CRM's
       // `orders` row → status=failed and surface it in your platform UI.
+      // `event.data.failure_reason` is the buyer-safe explanation.
       break;
-    case "refund.created":
+    case "charge.refunded":
       // Update your CRM's order/transaction → refunded.
-      // `event.refundId` identifies the refund.
+      // `event.data.refund_id` identifies the refund, and
+      // `event.data.is_partial` distinguishes a partial from a full refund —
+      // do not reverse the whole order on a partial.
       break;
     default:
       // Unknown event type — ack 200 but take no action.

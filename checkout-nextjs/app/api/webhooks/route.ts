@@ -32,14 +32,16 @@ export async function POST(req: NextRequest) {
   // do NOT fulfill orders on `session.failed`. Session IDs
   // are deep-link tokens — keep them out of general application logs and only
   // surface in systems with the same trust boundary as the API key itself.
-  switch (event.event) {
+  switch (event.type) {
     case "session.succeeded":
-      // Replace this with your order-fulfillment logic. `event.sessionId` and
-      // `event.transactionId` are available here; pass them to your
-      // fulfillment system but avoid logging them verbatim.
+      // Replace this with your order-fulfillment logic. `event.data.session_id`
+      // and `event.data.transaction_id` are available here; pass them to your
+      // fulfillment system but avoid logging them verbatim. Dedupe on
+      // `event.id` so a redelivery cannot fulfill the same order twice.
       break;
     case "session.failed":
       // Payment did not complete — do not fulfill.
+      // `event.data.failure_reason` is the buyer-safe explanation.
       break;
     default:
       // Unknown event type — accept the webhook (ack 200) but take no action.
