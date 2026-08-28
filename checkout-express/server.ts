@@ -172,7 +172,7 @@ app.get("/success", async (req, res) => {
     <h1>Payment successful</h1>
     <p>Session: ${esc(params.session)}</p>
     <p>Status: ${esc(outcome.status ?? "")}</p>
-    <p>Amount: ${esc(displayAmount)} ${esc(params.currency)}</p>
+    <p>Amount: ${esc(displayAmount)} ${esc(outcome.currency ?? "")}</p>
     <p>Transaction: ${esc(outcome.transactionId ?? "N/A")}</p>
   `);
 });

@@ -15,7 +15,7 @@ The patterns that aren't obvious from the single-merchant samples:
 | Per-tenant credential lookup | `lib/tenants.ts` → `getTenantCredentials(tenantId)` |
 | Tenant-scoped session creation with `Idempotency-Key` | `app/api/charge/route.ts` |
 | Tenant-scoped `Von-Pay-Version` header | `app/api/charge/route.ts` (via SDK config) |
-| Tenant-scoped return-URL signature verification | `app/tenants/[merchantId]/confirm/page.tsx` |
+| Tenant-scoped confirmation via each tenant's own API key | `app/tenants/[merchantId]/confirm/page.tsx` |
 | **Multi-tenant webhook routing** — single endpoint, route by `merchantId` | `app/api/webhooks/route.ts` |
 | Per-tenant webhook signature verification with the tenant's `whsec_*` | `app/api/webhooks/route.ts` |
 | In-memory event idempotency dedup | `app/api/webhooks/route.ts` (replace with Redis in production) |
@@ -58,7 +58,7 @@ Open `http://localhost:3000`:
 3. The browser hits `/api/charge`, which looks up Acme's keys and creates a session
 4. You're redirected to the Von Payments hosted checkout
 5. Complete with a [test card](https://docs.vonpay.com/reference/test-cards) (e.g. `4242 4242 4242 4242`)
-6. Return to `/tenants/tenant_a/confirm` — the page verifies the return signature using **Acme's** session signing secret, not the other tenants'
+6. Return to `/tenants/tenant_a/confirm` — the page re-reads the session from the API using **Acme's** own secret key, not the other tenants'. ⚠️ It does NOT verify the return signature: that signature uses a platform-wide secret no tenant holds, so a per-tenant check could only ever fail. The per-tenant isolation here comes from the API key, which is the stronger guarantee
 
 ### 3. Test webhooks (optional)
 

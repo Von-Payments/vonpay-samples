@@ -99,7 +99,7 @@ export default async function ConfirmPage({
       <h1>Payment successful</h1>
       <p>Session: {outcome.sessionId}</p>
       <p>Status: {outcome.status}</p>
-      <p>Amount: {displayAmount} {params.currency}</p>
+      <p>Amount: {displayAmount} {outcome.currency ?? ""}</p>
       <p>Transaction: {outcome.transactionId ?? "N/A"}</p>
     </main>
   );

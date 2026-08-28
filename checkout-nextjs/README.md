@@ -51,7 +51,7 @@ app/api/webhooks/route.ts      — HMAC-signed webhook verification
 next.config.ts                 — CSP / HSTS / X-Frame-Options / Referrer-Policy headers
 ```
 
-The `sessions.create()` call receives a fully-typed request and returns an `{id, checkoutUrl, expiresAt}` response. The buyer is redirected to `checkoutUrl`; after payment they're redirected back to `successUrl` with a signed query string that `VonPayCheckout.verifyReturnSignature(params, sessionSecret, ...)` validates.
+The `sessions.create()` call receives a fully-typed request and returns an `{id, checkoutUrl, expiresAt}` response. The buyer is redirected to `checkoutUrl`; After payment, the buyer is redirected back to `successUrl` with a signed query string. ⚠️ This sample does **not** verify that signature, deliberately: returns are signed with a platform-wide secret no merchant holds, so a per-merchant `ss_*` can only ever fail the check. ``sessions.confirmReturn()`` instead re-reads the session from the API using your own secret key — an authenticated answer to “did this buyer pay”, which the signature never was.
 
 Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header — there is no separate timestamp header). `vonpay.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent` discriminated union. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) — not your API key.
 

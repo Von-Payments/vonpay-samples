@@ -21,7 +21,10 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
   }
 
   const baseUrl = process.env.BASE_URL ?? "http://localhost:3000";
-  const { vpSk, ss } = getTenantCredentials(merchantId);
+  // `ss` is deliberately NOT destructured: the confirm page no longer verifies
+  // the return signature (see the note at `confirmReturn` below). It is still
+  // used for webhooks, where the per-tenant secret IS the right one.
+  const { vpSk } = getTenantCredentials(merchantId);
 
   // Confirm SERVER-SIDE against the tenant's own credentials.
   //
@@ -127,8 +130,7 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
           <tbody>
             <Row label="Session" value={sessionId} />
             <Row label="Transaction" value={txId || "—"} />
-            <Row label="Amount" value={`${dollarAmount} ${params2.currency ?? ""}`} />
-            <Row label="Signature verified" value="✓ valid" />
+            <Row label="Amount" value={`${dollarAmount} ${outcome.currency ?? ""}`} />
           </tbody>
         </table>
       </div>

@@ -109,7 +109,7 @@ export default async function ConfirmPage({
       <p>Session: {outcome.sessionId}</p>
       <p>Status: {outcome.status}</p>
       <p>
-        Amount: {displayAmount} {params.currency}
+        Amount: {displayAmount} {outcome.currency ?? ""}
       </p>
       <p>Transaction: {outcome.transactionId ?? "N/A"}</p>
       <p>
