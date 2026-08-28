@@ -131,23 +131,40 @@ export async function POST(req: NextRequest) {
   // boundary as the API key itself.
   console.log(`[${tenant.name}] webhook received: ${event.type}`);
 
+  // ⚠️ These are `charge.*`, not `session.*`. The server emits `session.*`
+  // internally, but those keys are absent from the merchant subscription
+  // catalog — which accepts an unknown event key, stores nothing and returns
+  // success. An endpoint subscribed to `session.succeeded` receives nothing,
+  // forever, with no error raised at any layer. For a PLATFORM that is the
+  // worst version of this bug: no tenant's order would ever be fulfilled, and
+  // nothing anywhere would report a fault.
   switch (event.type) {
-    case "session.succeeded":
+    case "charge.succeeded":
       // Buyer actually paid. Update your CRM's `orders` row → status=paid
       // and trigger any downstream effects (fulfillment, receipt, etc.).
       // `event.data.session_id` + `event.data.transaction_id` are available
       // here; pass them to your systems but avoid logging them verbatim.
       break;
-    case "session.failed":
+    case "charge.failed":
       // Payment did not complete — do NOT fulfill. Update your CRM's
       // `orders` row → status=failed and surface it in your platform UI.
       // `event.data.failure_reason` is the buyer-safe explanation.
       break;
     case "charge.refunded":
       // Update your CRM's order/transaction → refunded.
-      // `event.data.refund_id` identifies the refund, and
-      // `event.data.is_partial` distinguishes a partial from a full refund —
-      // do not reverse the whole order on a partial.
+      //
+      // ⚠️ Read `refund_amount` (what THIS event moved) and
+      // `amount_refunded_total` (running total), NOT `amount` or `is_partial`.
+      // Those two are ambiguous across payment connectors on a SECOND partial
+      // refund — some report this refund's delta, some the cumulative total.
+      // Compare `amount_refunded_total` against `original_charge_amount`.
+      break;
+    case "refund.failed":
+      // A refund could NOT be completed — no money moved on this event. Put
+      // the order back into a "refund owed" state and alert someone; nothing
+      // retries this for you. `reason_code` is `refund_declined` (terminal) or
+      // `refund_unresolved` (no provider response — the true state is unknown,
+      // so do NOT assume the buyer was not paid).
       break;
     default:
       // Unknown event type — ack 200 but take no action.

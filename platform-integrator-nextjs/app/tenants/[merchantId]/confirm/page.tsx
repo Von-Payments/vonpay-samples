@@ -39,7 +39,14 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
     // malformed tenant key, and outside it that becomes a framework 500 for a
     // buyer who has just paid — bypassing the friendly page below.
     const vonpay = new VonPayCheckout(vpSk);
-    outcome = await vonpay.sessions.confirmReturn(params2, ss, {
+    // ⚠️ NO `secret` ARGUMENT, DELIBERATELY. Returns are signed with a
+    // PLATFORM-WIDE secret that no merchant holds — holding it would let any
+    // merchant forge any other merchant's confirmations. Passing a per-merchant
+    // `ss_*` here buys a check that can only ever FAIL, and gating the page on
+    // that failure renders "invalid signature" to a buyer who just paid.
+    // `signatureValid` is `null` here (not checked); the authenticated session
+    // read is what answers "did this buyer pay".
+    outcome = await vonpay.sessions.confirmReturn(params2, undefined, {
       expectedSuccessUrl: `${baseUrl}/tenants/${merchantId}/confirm`,
       expectedKeyMode: vpSk.includes("_test_") ? "test" : "live",
       maxAgeSeconds: 600,
@@ -59,22 +66,6 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
         <p className="muted">
           No action needed — if the buyer was charged, the order is safe. The
           webhook will settle it. Please refresh in a moment.
-        </p>
-        <Link href={`/tenants/${merchantId}`} className="btn">
-          ← Back to {tenant.name}
-        </Link>
-      </div>
-    );
-  }
-
-  if (!outcome.signatureValid) {
-    return (
-      <div className="card" style={{ borderColor: "#fecaca", background: "#fef2f2" }}>
-        <h1 style={{ marginTop: 0, color: "#991b1b" }}>Invalid return signature</h1>
-        <p className="muted">
-          The redirect from Von Payments was not signed correctly for this
-          tenant. This can happen if the wrong session signing secret is
-          configured, or if someone tampered with the redirect URL.
         </p>
         <Link href={`/tenants/${merchantId}`} className="btn">
           ← Back to {tenant.name}
@@ -107,11 +98,14 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
   // `outcome.status` is the server's reading, not the query string's snapshot.
   const status = outcome.status ?? "unknown";
   const sessionId = outcome.sessionId ?? params2.session ?? "";
-  const txId = params2.transaction_id ?? "";
-  const minor = Number.parseInt(params2.amount ?? "", 10);
-  const dollarAmount = Number.isFinite(minor)
-    ? `$${(minor / 100).toFixed(2)}`
-    : params2.amount;
+  const txId = outcome.transactionId ?? "";
+  // ⚠️ Render the SERVER's amount, never `amount` from the redirect query
+  // string. The query string is buyer-controlled and unauthenticated: anyone
+  // can complete a real 1-unit payment and then edit the URL to show a
+  // confirmation for any figure they like. `outcome.amount` came back from the
+  // authenticated session read.
+  const minor = typeof outcome.amount === "number" ? outcome.amount : NaN;
+  const dollarAmount = Number.isFinite(minor) ? `$${(minor / 100).toFixed(2)}` : "—";
 
   return (
     <>

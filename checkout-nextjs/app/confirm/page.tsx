@@ -6,7 +6,6 @@ export default async function ConfirmPage({
   searchParams: Promise<Record<string, string>>;
 }) {
   const params = await searchParams;
-  const sessionSecret = process.env.VON_PAY_SESSION_SECRET!;
   const apiKey = process.env.VON_PAY_SECRET_KEY ?? "";
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
 
@@ -27,7 +26,14 @@ export default async function ConfirmPage({
     // key is missing, and outside it that becomes a framework 500 for a buyer
     // who has just paid — bypassing the friendly page below.
     const vonpay = new VonPayCheckout(apiKey);
-    outcome = await vonpay.sessions.confirmReturn(params, sessionSecret, {
+    // ⚠️ NO `secret` ARGUMENT, DELIBERATELY. Returns are signed with a
+    // PLATFORM-WIDE secret that no merchant holds — holding it would let any
+    // merchant forge any other merchant's confirmations. Passing a per-merchant
+    // `ss_*` here buys a check that can only ever FAIL, and gating the page on
+    // that failure renders "invalid signature" to a buyer who just paid.
+    // `signatureValid` is `null` here (not checked); the authenticated session
+    // read is what answers "did this buyer pay".
+    outcome = await vonpay.sessions.confirmReturn(params, undefined, {
       expectedSuccessUrl: `${baseUrl}/confirm`,
       expectedKeyMode: apiKey.includes("_test_") ? "test" : "live",
       maxAgeSeconds: 600,
@@ -48,15 +54,6 @@ export default async function ConfirmPage({
           No action needed — if you were charged, your order is safe. Please
           refresh in a moment.
         </p>
-      </main>
-    );
-  }
-
-  if (!outcome.signatureValid) {
-    return (
-      <main>
-        <h1>Invalid return signature</h1>
-        <p>The payment confirmation could not be verified.</p>
       </main>
     );
   }
@@ -86,8 +83,13 @@ export default async function ConfirmPage({
     );
   }
 
-  const minorAmount = Number.parseInt(params.amount ?? "", 10);
-  const displayAmount = Number.isFinite(minorAmount) ? (minorAmount / 100).toFixed(2) : params.amount;
+  // ⚠️ Render the SERVER's amount, never `amount` from the redirect query
+  // string. The query string is buyer-controlled and unauthenticated: anyone
+  // can complete a real 1-unit payment and then edit the URL to show a
+  // confirmation for any figure they like. `outcome.amount` came back from the
+  // authenticated session read.
+  const displayAmount =
+    typeof outcome.amount === "number" ? (outcome.amount / 100).toFixed(2) : "—";
 
   // ⚠️ Displaying a confirmation is safe to repeat. FULFILLING is not — this URL
   // can be replayed, and the status keeps reading "succeeded" every time. Record
@@ -98,7 +100,7 @@ export default async function ConfirmPage({
       <p>Session: {outcome.sessionId}</p>
       <p>Status: {outcome.status}</p>
       <p>Amount: {displayAmount} {params.currency}</p>
-      <p>Transaction: {params.transaction_id ?? "N/A"}</p>
+      <p>Transaction: {outcome.transactionId ?? "N/A"}</p>
     </main>
   );
 }

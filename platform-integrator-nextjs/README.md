@@ -134,7 +134,7 @@ Webhook deliveries are retried on failure. The receiver must dedupe. The sample 
 ## What this sample doesn't cover
 
 - **Per-tenant rate limiting** — your platform should rate-limit charge POSTs per tenant to prevent abuse; not shown here.
-- **Outbound webhooks to your merchants** — your platform may want to forward `session.succeeded` events to the merchant's own webhook URL (their internal CRM, fulfillment system). Not in scope of this sample.
+- **Outbound webhooks to your merchants** — your platform may want to forward `charge.succeeded` events to the merchant's own webhook URL (their internal CRM, fulfillment system). Not in scope of this sample. (Not `session.succeeded`: the server emits `session.*` internally, but those keys are not in the merchant subscription catalog, so an endpoint subscribed to one receives nothing, forever.)
 - **Captures, voids, and refunds** — the SDK exposes `paymentIntents.capture`, `paymentIntents.void`, and `refunds.create` natively. A platform would call these with the tenant's `vp_sk`, the same way `/api/charge` does for sessions.
 
 ## Tested against

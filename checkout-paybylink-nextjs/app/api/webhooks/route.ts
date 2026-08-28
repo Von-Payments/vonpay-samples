@@ -26,11 +26,18 @@ export async function POST(req: NextRequest) {
     let sessionId: string | undefined;
     // Every field on `event.data` is nullable — the processor does not always
     // report one. Coerce to `undefined` rather than storing a literal null.
-    if (event.type === "session.succeeded") {
+    //
+    // ⚠️ These are `charge.*`, not `session.*`. The server emits `session.*`
+    // internally, but those keys are absent from the merchant subscription
+    // catalog — which accepts an unknown event key, stores nothing and returns
+    // success. An endpoint subscribed to `session.succeeded` receives nothing,
+    // forever, with no error raised at any layer, and every paid link would sit
+    // at `pending` for good. `charge.*` is the subscribable family.
+    if (event.type === "charge.succeeded") {
       nextStatus = "paid";
       transactionId = event.data.transaction_id ?? undefined;
       sessionId = event.data.session_id ?? undefined;
-    } else if (event.type === "session.failed") {
+    } else if (event.type === "charge.failed") {
       nextStatus = "failed";
       sessionId = event.data.session_id ?? undefined;
     }

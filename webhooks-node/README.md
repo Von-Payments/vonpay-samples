@@ -10,7 +10,7 @@ A standalone reference integration showing how to **receive, verify, and process
 
 | Route | Header | Secret | Events |
 |---|---|---|---|
-| `POST /webhooks/vonpay` | `x-vonpay-signature: t=<unix>,v1=<hex>` | Per-endpoint `whsec_*` | `session.succeeded`, `session.failed`, `refund.created` |
+| `POST /webhooks/vonpay` | `x-vonpay-signature: t=<unix>,v1=<hex>` | Per-endpoint `whsec_*` | `charge.succeeded`, `charge.failed`, `charge.refunded`, `refund.failed` |
 
 The handler shows:
 
@@ -47,7 +47,7 @@ The fastest way to test verification end-to-end is the CLI — it signs a synthe
 ```bash
 npm install -g @vonpay/checkout-cli
 vonpay checkout login
-vonpay checkout trigger session.succeeded --url http://localhost:3000/webhooks/vonpay
+vonpay checkout trigger charge.succeeded --url http://localhost:3000/webhooks/vonpay
 ```
 
 A passing test means your signature verification is correct, not just that the JSON parsed.
@@ -57,7 +57,9 @@ To receive **real** deliveries from a sandbox checkout, the endpoint needs a pub
 - **ngrok** — `ngrok http 3000`, then register `https://….ngrok-free.app/webhooks/vonpay` in the dashboard.
 - **cloudflared** — `cloudflared tunnel --url http://localhost:3000`. Same idea, no account needed.
 
-Register the public URL in the dashboard at [app.vonpay.com/dashboard/developers/webhooks](https://app.vonpay.com/dashboard/developers/webhooks), choose the events you want, then complete a sandbox checkout to fire `session.succeeded`.
+Register the public URL in the dashboard at [app.vonpay.com/dashboard/developers/webhooks](https://app.vonpay.com/dashboard/developers/webhooks), choose the events you want, then complete a sandbox checkout to fire `charge.succeeded`.
+
+> ⚠️ **Do not subscribe to `session.succeeded`.** The server emits `session.*` events internally, but they are not in the merchant subscription catalog. The subscription API accepts an unknown event key, stores nothing and returns success — so an endpoint subscribed to `session.succeeded` receives nothing, forever, with no error raised at any layer. Fulfil from `charge.succeeded`.
 
 See the [test-in-sandbox guide](https://docs.vonpay.com/guides/test-in-sandbox) for the full sandbox flow.
 
@@ -66,7 +68,7 @@ See the [test-in-sandbox guide](https://docs.vonpay.com/guides/test-in-sandbox) 
 A successful delivery prints one structured JSON line per event (note: business IDs like `sessionId` / `transactionId` are deliberately kept out of the log line — they are sensitive deep-link tokens):
 
 ```json
-{"level":"info","route":"/webhooks/vonpay","event":"session.succeeded","merchantId":"merch_abc123","amount":1499,"currency":"USD","replay":false}
+{"level":"info","route":"/webhooks/vonpay","event":"charge.succeeded","merchantId":"merch_abc123","amount":1499,"currency":"USD","replay":false}
 ```
 
 A redelivery (same event after a transient 5xx) prints `"replay":true`.

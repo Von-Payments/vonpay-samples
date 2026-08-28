@@ -9,7 +9,6 @@ const app = express();
 const port = parseInt(process.env.PORT ?? "3000", 10);
 
 const apiKey = process.env.VON_PAY_SECRET_KEY!;
-const sessionSecret = process.env.VON_PAY_SESSION_SECRET!;
 // Per-endpoint webhook signing secret (whsec_…), shown once when you create
 // the webhook endpoint. This is NOT your API key — verifying with the API key
 // will fail against real production deliveries.
@@ -59,18 +58,24 @@ app.post("/webhooks", (req, res) => {
     return;
   }
 
-  // Branch on event type. Only `session.succeeded` means the buyer actually paid;
-  // do NOT fulfill orders on `session.failed`. Session IDs
+  // Branch on event type. `charge.succeeded` is the event that means the buyer
+  // actually paid; do NOT fulfill orders on `charge.failed`. Session IDs
   // are deep-link tokens — keep them out of general application logs and only
   // surface in systems with the same trust boundary as the API key itself.
+  //
+  // ⚠️ Do NOT subscribe to `session.succeeded`. The server emits it internally,
+  // but it is absent from the merchant subscription catalog — which accepts an
+  // unknown event key, stores nothing and returns success. An endpoint
+  // subscribed to it receives nothing, forever, and no error is raised at any
+  // layer. `charge.*` is the subscribable family.
   switch (event.type) {
-    case "session.succeeded":
+    case "charge.succeeded":
       // Replace this with your order-fulfillment logic. `event.data.session_id`
       // and `event.data.transaction_id` are available here; pass them to your
       // fulfillment system but avoid logging them verbatim. Dedupe on
       // `event.id` so a redelivery cannot fulfill the same order twice.
       break;
-    case "session.failed":
+    case "charge.failed":
       // Payment did not complete — do not fulfill.
       // `event.data.failure_reason` is the buyer-safe explanation.
       break;
@@ -100,7 +105,14 @@ app.get("/success", async (req, res) => {
   // close laptops and never load this page.
   let outcome;
   try {
-    outcome = await vonpay.sessions.confirmReturn(params, sessionSecret, {
+    // ⚠️ NO `secret` ARGUMENT, DELIBERATELY. Returns are signed with a
+    // PLATFORM-WIDE secret that no merchant holds — holding it would let any
+    // merchant forge any other merchant's confirmations. Passing a per-merchant
+    // `ss_*` here buys a check that can only ever FAIL, and gating the page on
+    // that failure renders "invalid signature" to a buyer who just paid.
+    // `signatureValid` is `null` here (not checked); the authenticated session
+    // read is what answers "did this buyer pay".
+    outcome = await vonpay.sessions.confirmReturn(params, undefined, {
       expectedSuccessUrl: `http://localhost:${port}/success`,
       expectedKeyMode: apiKey.includes("_test_") ? "test" : "live",
       maxAgeSeconds: 600,
@@ -124,11 +136,6 @@ app.get("/success", async (req, res) => {
     return;
   }
 
-  if (!outcome.signatureValid) {
-    res.status(400).send("<h1>Invalid return signature</h1>");
-    return;
-  }
-
   // ⚠️ IN FLIGHT is not DECLINED. On the 3-D Secure path the buyer is returned
   // here BEFORE the charge settles, so this is the ordinary case there — not an
   // edge case. Telling this buyer their payment failed is how they end up
@@ -149,10 +156,13 @@ app.get("/success", async (req, res) => {
     return;
   }
 
-  const minorAmount = Number.parseInt(params.amount ?? "", 10);
-  const displayAmount = Number.isFinite(minorAmount)
-    ? (minorAmount / 100).toFixed(2)
-    : params.amount;
+  // ⚠️ Render the SERVER's amount, never `amount` from the redirect query
+  // string. The query string is buyer-controlled and unauthenticated: anyone
+  // can complete a real 1-unit payment and then edit the URL to show a
+  // confirmation for any figure they like. `outcome.amount` came back from the
+  // authenticated session read.
+  const displayAmount =
+    typeof outcome.amount === "number" ? (outcome.amount / 100).toFixed(2) : "—";
 
   // ⚠️ Displaying a confirmation is safe to repeat. FULFILLING is not — this
   // URL can be replayed, and the status keeps reading "succeeded" every time.
@@ -163,7 +173,7 @@ app.get("/success", async (req, res) => {
     <p>Session: ${esc(params.session)}</p>
     <p>Status: ${esc(outcome.status ?? "")}</p>
     <p>Amount: ${esc(displayAmount)} ${esc(params.currency)}</p>
-    <p>Transaction: ${esc(params.transaction_id ?? "N/A")}</p>
+    <p>Transaction: ${esc(outcome.transactionId ?? "N/A")}</p>
   `);
 });
 

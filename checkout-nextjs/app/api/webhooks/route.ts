@@ -28,18 +28,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
-  // Branch on event type. Only `session.succeeded` means the buyer actually paid;
-  // do NOT fulfill orders on `session.failed`. Session IDs
+  // Branch on event type. `charge.succeeded` is the event that means the buyer
+  // actually paid; do NOT fulfill orders on `charge.failed`. Session IDs
   // are deep-link tokens — keep them out of general application logs and only
   // surface in systems with the same trust boundary as the API key itself.
+  //
+  // ⚠️ Do NOT subscribe to `session.succeeded`. The server emits it internally,
+  // but it is absent from the merchant subscription catalog — which accepts an
+  // unknown event key, stores nothing and returns success. An endpoint
+  // subscribed to it receives nothing, forever, and no error is raised at any
+  // layer. `charge.*` is the subscribable family.
   switch (event.type) {
-    case "session.succeeded":
+    case "charge.succeeded":
       // Replace this with your order-fulfillment logic. `event.data.session_id`
       // and `event.data.transaction_id` are available here; pass them to your
       // fulfillment system but avoid logging them verbatim. Dedupe on
       // `event.id` so a redelivery cannot fulfill the same order twice.
       break;
-    case "session.failed":
+    case "charge.failed":
       // Payment did not complete — do not fulfill.
       // `event.data.failure_reason` is the buyer-safe explanation.
       break;

@@ -9,7 +9,6 @@ from vonpay.checkout import VonPayCheckout, VonPayError
 app = Flask(__name__)
 
 API_KEY = os.environ["VON_PAY_SECRET_KEY"]
-SESSION_SECRET = os.environ["VON_PAY_SESSION_SECRET"]
 # Per-endpoint webhook signing secret (whsec_…), shown once when you create the
 # webhook endpoint. This is NOT your API key.
 WEBHOOK_SECRET = os.environ["VON_PAY_WEBHOOK_SECRET"]
@@ -54,16 +53,22 @@ def webhooks():
         # engine treats 4xx as a non-retryable bad request either way.
         return jsonify({"error": "invalid_signature"}), 400
 
-    # Branch on event type. Only `session.succeeded` means the buyer actually paid;
-    # do NOT fulfill orders on `session.failed`. Session IDs
+    # Branch on event type. `charge.succeeded` is the event that means the buyer
+    # actually paid; do NOT fulfill orders on `charge.failed`. Session IDs
     # are deep-link tokens — keep them out of general application logs and only
     # surface in systems with the same trust boundary as the API key itself.
-    if event.type == "session.succeeded":
+    #
+    # ⚠️ Do NOT subscribe to `session.succeeded`. The server emits it internally,
+    # but it is absent from the merchant subscription catalog — which accepts an
+    # unknown event key, stores nothing and returns success. An endpoint
+    # subscribed to it receives nothing, forever, and no error is raised at any
+    # layer. `charge.*` is the subscribable family.
+    if event.type == "charge.succeeded":
         # Replace this with your order-fulfillment logic. `event.data.session_id`
         # and `event.data.transaction_id` are available here; pass them to your
         # fulfillment system but avoid logging them verbatim.
         pass
-    elif event.type == "session.failed":
+    elif event.type == "charge.failed":
         # Payment did not complete — do not fulfill.
         pass
     # Unknown event types — accept the webhook (ack 200) but take no action.
@@ -90,9 +95,15 @@ def success():
     # that it is the WEBHOOK that should trigger fulfilment — buyers close
     # laptops and never load this page.
     try:
+        # ⚠️ NO secret argument, DELIBERATELY. Returns are signed with a
+        # PLATFORM-WIDE secret that no merchant holds — holding it would let any
+        # merchant forge any other merchant's confirmations. Passing a
+        # per-merchant ``ss_*`` here buys a check that can only ever FAIL, and
+        # gating the page on that failure renders "invalid signature" to a buyer
+        # who just paid. ``signature_valid`` is ``None`` here (not checked); the
+        # authenticated session read is what answers "did this buyer pay".
         outcome = checkout.sessions.confirm_return(
             params,
-            SESSION_SECRET,
             expected_success_url=f"{BASE_URL}/success",
             expected_key_mode=expected_mode,
             max_age_seconds=600,
@@ -111,9 +122,6 @@ def success():
             "Please refresh in a moment.</p>",
             503,
         )
-
-    if not outcome.signature_valid:
-        return "<h1>Invalid signature</h1>", 400
 
     # ⚠️ IN FLIGHT is not DECLINED. On the 3-D Secure path the buyer is returned
     # here BEFORE the charge settles, so this is the ordinary case there — not

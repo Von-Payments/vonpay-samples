@@ -65,7 +65,12 @@ app.use(express.json());
 //          INSIDE the header (the `t=` part); there is no separate timestamp
 //          header.
 // Secret:  the per-endpoint `whsec_*` signing secret (NOT your API key).
-// Events:  session.succeeded, session.failed, refund.created.
+// Events:  charge.succeeded, charge.failed, charge.refunded, refund.failed.
+//          ⚠️ NOT session.succeeded — the server emits `session.*` internally,
+//          but those keys are absent from the merchant subscription catalog,
+//          which accepts an unknown key, stores nothing and returns success.
+//          An endpoint subscribed to one receives nothing, forever, with no
+//          error at any layer. (`refund.created` never existed at all.)
 //
 // `vonpay.webhooks.constructEvent` does the whole verify-and-parse step in one
 // call: it parses the header, recomputes HMAC-SHA256 over `${t}.${rawBody}`,
@@ -118,11 +123,11 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
 
   try {
     switch (event.type) {
-      case "session.succeeded":
+      case "charge.succeeded":
         // → fulfill the order, send the receipt, mark the order paid in your DB.
-        // Only `session.succeeded` means the buyer actually paid. Session and
-        // transaction IDs are sensitive deep-link tokens — pass them to your
-        // fulfillment system but avoid logging them verbatim.
+        // This is the fulfilment event. Session and transaction IDs are
+        // sensitive deep-link tokens — pass them to your fulfillment system but
+        // avoid logging them verbatim.
         console.log({
           level: "info",
           route: "/webhooks/vonpay",
@@ -133,9 +138,9 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
           replay: !isFirstDelivery,
         });
         break;
-      case "session.failed":
+      case "charge.failed":
         // → mark the order failed; surface the failure reason in the buyer UI.
-        // Do NOT fulfill on a failed session.
+        // Do NOT fulfill on a failed charge.
         console.log({
           level: "info",
           route: "/webhooks/vonpay",
@@ -148,17 +153,45 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
         break;
       case "charge.refunded":
         // → reverse fulfillment, post a credit memo, notify the buyer.
-        // `is_partial` distinguishes a partial refund from a full one — do not
-        // reverse the whole order on a partial.
+        //
+        // ⚠️ Read `refund_amount` (what THIS event moved) and
+        // `amount_refunded_total` (running total against the charge), NOT
+        // `amount` or `is_partial`. Those two are ambiguous across payment
+        // connectors on a SECOND partial refund — some report this refund's
+        // delta and some the cumulative total, and nothing on the wire tells
+        // you which. Decide "is this charge now fully refunded?" by comparing
+        // `amount_refunded_total` against `original_charge_amount`.
         console.log({
           level: "info",
           route: "/webhooks/vonpay",
           event: event.type,
           merchantId: event.merchant_id,
           refundId: event.data.refund_id,
-          amount: event.data.amount,
+          refundAmount: event.data.refund_amount,
+          refundedTotal: event.data.amount_refunded_total,
+          originalChargeAmount: event.data.original_charge_amount,
           currency: event.data.currency,
-          isPartial: event.data.is_partial,
+          replay: !isFirstDelivery,
+        });
+        break;
+      case "refund.failed":
+        // → a refund could NOT be completed. No money moved on this event:
+        // `refund_amount` is the reversal that failed to go through. Put the
+        // order back in a "refund owed" state and alert someone — nothing
+        // retries this for you. `reason_code` is a locked two-value set:
+        // `refund_declined` (terminal decline) or `refund_unresolved` (no
+        // provider response — the true state is unknown, so do NOT assume the
+        // buyer was not paid). `retry_available` says whether a retry is
+        // permitted at all.
+        console.log({
+          level: "warn",
+          route: "/webhooks/vonpay",
+          event: event.type,
+          merchantId: event.merchant_id,
+          refundId: event.data.refund_id,
+          refundAmount: event.data.refund_amount,
+          reasonCode: event.data.reason_code,
+          retryAvailable: event.data.retry_available,
           replay: !isFirstDelivery,
         });
         break;

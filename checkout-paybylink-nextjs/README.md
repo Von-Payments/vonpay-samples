@@ -26,7 +26,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) — the root redirects to `/links`. Fill in the form, click **Create pay link**, share the URL or QR. When the buyer completes payment, `/api/webhooks` receives `session.succeeded` and flips the link's status to `paid`. The detail page polls every 5 seconds while the status is `pending`, so the badge updates without a manual refresh.
+Open [http://localhost:3000](http://localhost:3000) — the root redirects to `/links`. Fill in the form, click **Create pay link**, share the URL or QR. When the buyer completes payment, `/api/webhooks` receives `charge.succeeded` and flips the link's status to `paid`. The detail page polls every 5 seconds while the status is `pending`, so the badge updates without a manual refresh.
 
 > **Dev-mode caveat:** the in-memory store in `lib/storage.ts` resets on every Next.js dev-server hot-reload (any file save). Create a link, then avoid editing files until you're done testing, or swap in a persistent store.
 
@@ -59,7 +59,7 @@ next.config.ts                     — CSP / HSTS / X-Frame-Options / Referrer-P
 
 The `sessions.create()` call is the same one the cart → redirect sample makes — the difference is that here the merchant operator creates the session ahead of time (no buyer cart) and surfaces the URL out-of-band (email, SMS, QR). `cancelUrl` points back at the link detail page so a buyer who bails can resume from the same link.
 
-Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header — there is no separate timestamp header). `vonpay.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent` discriminated union. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) — not your API key. This sample listens for `session.succeeded` and `session.failed` to update the link's status.
+Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header — there is no separate timestamp header). `vonpay.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent` discriminated union. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) — not your API key. This sample listens for `charge.succeeded` and `charge.failed` to update the link's status. ⚠️ **Not `session.succeeded`** — the server emits `session.*` internally, but those keys are absent from the merchant subscription catalog, which accepts an unknown event key, stores nothing and returns success. An endpoint subscribed to one receives nothing, forever, and every paid link would sit at `pending`.
 
 ## Security notes
 

@@ -56,7 +56,7 @@ The `sessions.create()` call returns a `CheckoutSession` dataclass with `id`, `c
 
 Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header — there is no separate timestamp header). `checkout.webhooks.construct_event(raw_body, signature_header, webhook_secret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent`. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) — not your API key.
 
-The webhook handler branches on `event.type`. Only `session.succeeded` means the buyer actually paid — do **not** fulfill on `session.failed`. Unknown event types are acked (200) with no action.
+The webhook handler branches on `event.type`. `charge.succeeded` means the buyer actually paid — do **not** fulfill on `charge.failed`. Unknown event types are acked (200) with no action. ⚠️ Do **not** subscribe to `session.succeeded`: the server emits it internally but it is not in the merchant subscription catalog, which silently drops unknown keys and returns success — an endpoint subscribed to it receives nothing, forever.
 
 ## Security notes
 
