@@ -1,2 +1,2 @@
-vonpay-checkout>=1,<2
+vonpay-checkout>=2,<3
 python-dotenv>=1.0.0
