@@ -222,11 +222,25 @@ app.post("/charge", async (req: Request, res: Response): Promise<void> => {
     }
 
     case "failed": {
-      // Declined before any challenge. `declineCode` is a generic reason.
+      // Declined before any challenge.
+      //
+      // ⛔ `declineCode` IS NOT UNCONDITIONALLY BROWSER-SAFE, and this sample
+      // used to relay it raw. When it is `blocked_by_rule` it means one of YOUR
+      // OWN rules refused the charge, not the cardholder's bank — and anyone
+      // holding your publishable key could then iterate cards and map which
+      // brands, ranges or countries your rules refuse, in order to route around
+      // them. The buyer's next step is identical either way: a different card.
+      //
+      // So substitute the generic value for that one case. Everything else is
+      // safe to pass through, and `declineMessage` (SDK 2.1.0+) gives you
+      // buyer-ready copy under the same rule.
+      const browserSafeDeclineCode =
+        intent.declineCode === "blocked_by_rule" ? "card_declined" : intent.declineCode;
+
       res.status(402).json({
         outcome: "failed",
         intentId: intent.id,
-        declineCode: intent.declineCode,
+        declineCode: browserSafeDeclineCode,
       });
       return;
     }
