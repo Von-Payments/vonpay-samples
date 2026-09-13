@@ -47,15 +47,38 @@ import {
 const seenEventKeys = new Map<string, number>();
 const SEEN_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
-function dedupe(eventKey: string): boolean {
+/** Peek — has this event already been processed to COMPLETION? Does not record. */
+function alreadyCompleted(eventKey: string): boolean {
   const now = Date.now();
   // Sweep stale entries cheap (every call — the map is small).
   for (const [k, ts] of seenEventKeys) {
     if (now - ts > SEEN_TTL_MS) seenEventKeys.delete(k);
   }
-  if (seenEventKeys.has(eventKey)) return false;
-  seenEventKeys.set(eventKey, now);
-  return true;
+  return seenEventKeys.has(eventKey);
+}
+
+/**
+ * Record an event as COMPLETED. Call only AFTER processing has succeeded.
+ *
+ * ⛔ MARK ON SUCCESS, NOT ON RECEIPT. Until 2026-09-12 this file recorded the
+ * key at the moment the event arrived, and then returned early on any later
+ * delivery. If processing threw on the FIRST delivery — a DB write timeout, a
+ * failed outbound post to the merchant, no attacker required — the event was
+ * already recorded as seen. The buyer had paid, the platform never updated its
+ * model, and every subsequent delivery, including a manual resend, was dropped
+ * as a duplicate.
+ *
+ * Recording completion instead means a failed first attempt leaves no mark, so
+ * a redelivery genuinely retries.
+ *
+ * ⚠️ An in-memory Map cannot claim a key atomically, so two duplicate
+ * deliveries processed CONCURRENTLY can both run. A real platform inserts the
+ * event id into a table with a UNIQUE index as `processing` and updates it to
+ * `completed` — which closes that window and survives the restart this Map
+ * does not.
+ */
+function markCompleted(eventKey: string): void {
+  seenEventKeys.set(eventKey, Date.now());
 }
 
 export async function POST(req: NextRequest) {
@@ -117,7 +140,7 @@ export async function POST(req: NextRequest) {
   // payload: a single money movement can emit more than one event, and a
   // payload-derived key can collapse two distinct events into one.
   const eventKey = event.id;
-  if (!dedupe(eventKey)) {
+  if (alreadyCompleted(eventKey)) {
     console.log(`Duplicate webhook ${eventKey} for tenant ${tenant.id} — skipping`);
     return NextResponse.json({ received: true, deduped: true });
   }
@@ -170,6 +193,11 @@ export async function POST(req: NextRequest) {
       // Unknown event type — ack 200 but take no action.
       break;
   }
+
+  // ⛔ Record completion only now, after the switch above has run without
+  // throwing. If it threw, this line is never reached, the event stays
+  // unrecorded, and a redelivery can genuinely retry it. See `markCompleted`.
+  markCompleted(eventKey);
 
   // Ack with a bare 200 — the delivery engine only needs to know we received
   // it. Don't echo the internal tenant id back to a third party.

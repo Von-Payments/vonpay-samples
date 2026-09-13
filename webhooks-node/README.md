@@ -16,7 +16,7 @@ The handler shows:
 
 - **One-call verify + parse** with the SDK's `webhooks.constructEvent` — it verifies the HMAC, enforces the replay window, accepts a rotation grace signature, and returns a typed event. No hand-rolled crypto.
 - **Raw-body parsing** (`express.raw` mounted *before* `express.json`) — webhook signatures are computed over the original bytes, not over re-serialized JSON.
-- **Idempotent processing** — keep a per-event guard so a redelivery (after a 5xx, a manual resend, or a secret rotation) doesn't double-fulfill.
+- **Idempotent processing** — a per-event guard so a redelivery (after a 5xx, a manual resend, or a secret rotation) doesn't double-fulfill. The guard is an **early return before the event handler runs** (`server.ts`, search for `isFirstDelivery`). ⚠️ Until 2026-09-12 this sample COMPUTED that flag and used it only in a log line, so the handler ran on every redelivery while this bullet promised it did not — copy the early-return shape, not just the flag.
 - **Correct error responses** — `400 { error: "Invalid signature" }` on verification failure; `200` on a handler bug *after* a valid signature (don't make Von Payments retry your bug).
 - **Safe logging** — log `err.message`, never the full error object or the raw body (both can carry signature/HMAC bytes and, on a future schema bump, PII).
 
@@ -68,10 +68,16 @@ See the [test-in-sandbox guide](https://docs.vonpay.com/guides/test-in-sandbox) 
 A successful delivery prints one structured JSON line per event (note: business IDs like `sessionId` / `transactionId` are deliberately kept out of the log line — they are sensitive deep-link tokens):
 
 ```json
-{"level":"info","route":"/webhooks/vonpay","event":"charge.succeeded","merchantId":"merch_abc123","amount":1499,"currency":"USD","replay":false}
+{"level":"info","route":"/webhooks/vonpay","event":"charge.succeeded","merchantId":"merch_abc123","amount":1499,"currency":"USD"}
 ```
 
-A redelivery (same event after a transient 5xx) prints `"replay":true`.
+A redelivery (same event after a transient 5xx) never reaches the handler at all. It short-circuits before the switch and prints:
+
+```json
+{"level":"info","route":"/webhooks/vonpay","msg":"duplicate_delivery_ignored","event":"charge.succeeded","dedupeKey":"vp_evt_..."}
+```
+
+…and answers `200 {"received":true,"deduped":true}`. The 200 is deliberate: the delivery was accepted, we had simply already acted on it. A non-2xx would make the sender retry the duplicate it just sent.
 
 A bad signature:
 

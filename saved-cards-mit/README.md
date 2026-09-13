@@ -104,17 +104,37 @@ const token = await vonpay.tokens.create({
 });
 ```
 
+## Send `buyerId` on every charge against a saved card
+
+**It is a protection, and it only applies when you send it.** When a token was
+vaulted against a buyer, the server requires the charge to name the same buyer
+and returns `404 payment_method_not_found` on a mismatch. That is what stops a
+stored card being billed to the wrong customer.
+
+The realistic failure is not an attacker — it is a billing job that joins the
+wrong token to the wrong subscriber row and charges someone else's card. Nothing
+rejects that charge unless `buyerId` is present.
+
+> ⚠️ Until 2026-09-12 this sample vaulted **with** a buyer and then charged
+> **without** one, at both call sites, and the diagram below showed it that way.
+> If you copied this sample before that date, add `buyerId` to your
+> `paymentIntents.create` calls.
+
+Omit it only for genuine guest or one-off charges; tokens saved with no buyer on
+file are unrestricted.
+
 ## How the chain works
 
 ```
 [buyer present]                         [buyer absent — your scheduler]
   tokens.create (off_session)             paymentIntents.create({
         │  └─ vp_pmt_… token id            payment_method: { id: vp_pmt_… },
-        ▼                                   mit: {
-  paymentIntents.create  ──── anchor ───────▶ initiator: "merchant",
-  ({ payment_method:       vpi_… id           reason: "recurring",
-     { id: vp_pmt_… } })                       originalTransactionId: vpi_…
-  (cardholder-initiated)                     }
+        ▼                                   buyer_id: "buyer_42",   ← REQUIRED
+  paymentIntents.create  ──── anchor ───────▶ mit: {
+  ({ payment_method:       vpi_… id             initiator: "merchant",
+     { id: vp_pmt_… },                          reason: "recurring",
+     buyer_id: "buyer_42" })                    originalTransactionId: vpi_…
+  (cardholder-initiated)                      }
   status: succeeded                         })
 ```
 

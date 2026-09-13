@@ -35,15 +35,47 @@ const vonpay = new VonPayCheckout(apiKey);
 const handledKeys = new Set<string>();
 const HANDLED_KEY_CAP = 10_000;
 
-function markHandled(key: string): boolean {
-  if (handledKeys.has(key)) return false;
+/** Peek — has this event already been fulfilled SUCCESSFULLY? Does not record. */
+function alreadyCompleted(key: string): boolean {
+  return handledKeys.has(key);
+}
+
+/**
+ * Record an event as COMPLETED. Call this only AFTER the handler has run
+ * without throwing.
+ *
+ * ⛔ MARK ON SUCCESS, NOT ON RECEIPT — this ordering is the whole guard.
+ *
+ * The obvious shape is to mark the key the moment the event arrives. It is
+ * wrong, and it fails in the direction that loses money silently: if the
+ * handler then throws (a DB write times out, a downstream fulfilment call
+ * 500s — no attacker required), the event is already recorded as handled. The
+ * buyer has paid, the order never ships, and every later delivery — including
+ * the manual resend this sample's README tells operators to use — is dropped
+ * as a duplicate. The failure is invisible: the endpoint answers 200 throughout.
+ *
+ * Recording completion instead means a first-attempt failure leaves NO mark, so
+ * a resend genuinely retries.
+ *
+ * ⚠️ Honest limit of an in-memory Set: two duplicate deliveries processed
+ * CONCURRENTLY can both observe "not completed" and both run. A real
+ * implementation claims the key atomically — a Postgres row with a UNIQUE
+ * index on the event id, inserted as `processing` and updated to `completed` —
+ * which closes that window and survives the restart this Set does not.
+ */
+function markCompleted(key: string): void {
+  if (handledKeys.has(key)) return;
   if (handledKeys.size >= HANDLED_KEY_CAP) {
     // Drop the oldest entry. Set iteration order is insertion order in V8.
+    //
+    // ⚠️ Eviction is itself a double-fulfilment window: an event whose key has
+    // aged out reads as new again. It needs sustained volume past the cap with
+    // no restart, which is the same condition the note above describes — one
+    // more reason the durable store is not optional in production.
     const first = handledKeys.values().next().value;
     if (first !== undefined) handledKeys.delete(first);
   }
   handledKeys.add(key);
-  return true;
 }
 
 // ─── Express app ────────────────────────────────────────────────────────
@@ -119,7 +151,37 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
   // payment), so a payload-derived key can collapse two distinct events into
   // one and silently drop the second.
   const dedupeKey = event.id;
-  const isFirstDelivery = markHandled(dedupeKey);
+  const isFirstDelivery = !alreadyCompleted(dedupeKey);
+
+  // ⛔ THIS EARLY RETURN IS THE GUARD. Until 2026-09-12 the dedupe decision was
+  // computed here and then used ONLY inside log lines — the switch below ran on
+  // every delivery, including redeliveries. The comment above and the README
+  // both promised idempotent processing; the code did not implement it, and
+  // this is the most-cloned webhook receiver we publish.
+  //
+  // It costs nothing to get wrong in the sample and everything downstream: the
+  // switch is where a merchant puts "fulfill the order, send the receipt". A
+  // redelivery needs no attacker — our own retry after a transient 5xx, or an
+  // ops resend, is enough to ship twice.
+  //
+  // ⚠️ The first version of this guard read a flag set BEFORE the handler ran,
+  // which quietly converted a failed first attempt into a permanent drop. See
+  // `markCompleted` for why the key is now recorded only on success.
+  //
+  // Returning 200 (not 4xx) is deliberate: the delivery WAS accepted, we have
+  // simply already acted on it. A non-2xx here would make the sender retry the
+  // duplicate it just sent.
+  if (!isFirstDelivery) {
+    console.log({
+      level: "info",
+      route: "/webhooks/vonpay",
+      msg: "duplicate_delivery_ignored",
+      event: event.type,
+      dedupeKey,
+    });
+    res.status(200).json({ received: true, deduped: true });
+    return;
+  }
 
   try {
     switch (event.type) {
@@ -135,7 +197,6 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
           merchantId: event.merchant_id,
           amount: event.data.amount,
           currency: event.data.currency,
-          replay: !isFirstDelivery,
         });
         break;
       case "charge.failed":
@@ -148,7 +209,6 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
           merchantId: event.merchant_id,
           error: event.data.failure_reason,
           failureCode: event.data.failure_code,
-          replay: !isFirstDelivery,
         });
         break;
       case "charge.refunded":
@@ -171,7 +231,6 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
           refundedTotal: event.data.amount_refunded_total,
           originalChargeAmount: event.data.original_charge_amount,
           currency: event.data.currency,
-          replay: !isFirstDelivery,
         });
         break;
       case "refund.failed":
@@ -192,7 +251,6 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
           refundAmount: event.data.refund_amount,
           reasonCode: event.data.reason_code,
           retryAvailable: event.data.retry_available,
-          replay: !isFirstDelivery,
         });
         break;
       default:
@@ -206,11 +264,23 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
           event: event.type,
         });
     }
+
+    // ⛔ COMPLETION IS RECORDED HERE — the last statement of the try, reached
+    // only if the handler above did not throw. Moving this earlier (to where
+    // the event arrives) is the bug described on `markCompleted`: it converts
+    // a failed first attempt into a permanent drop.
+    markCompleted(dedupeKey);
   } catch (handlerErr) {
     // The signature is already verified, so a bug in OUR handler must NOT
     // trigger a retry — we would just hit the same bug again. Log + alert +
     // acknowledge with 200. Real systems should fire a Sentry/Datadog alert
     // here so on-call sees the failure even though we returned 200.
+    //
+    // ⚠️ Note what is NOT done here: the event is deliberately left UNRECORDED,
+    // so a manual resend from the dashboard can genuinely retry it. Returning
+    // 200 stops the automatic retry loop (which would only re-hit the same
+    // bug); leaving the key unmarked keeps the human recovery path open. Those
+    // are two different decisions and this sample makes both on purpose.
     console.error({
       level: "error",
       route: "/webhooks/vonpay",

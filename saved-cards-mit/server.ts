@@ -94,6 +94,10 @@ async function main(): Promise<void> {
   // four steps. Re-running the script gives you a fresh run id (fresh chain).
   const runId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const subscriptionId = `sub_${runId}`;
+  // Declared ONCE and reused by the vault call and BOTH charges. It was
+  // previously inlined at the vault call only, and the two charges omitted it
+  // entirely — see the note at `anchorParams`.
+  const buyerId = `buyer_${runId}`;
 
   console.log("saved-cards-mit sample", { baseUrl: BASE_URL, runId });
 
@@ -127,7 +131,7 @@ async function main(): Promise<void> {
   try {
     token = await vonpay.tokens.create(
       {
-        buyerId: `buyer_${runId}`,
+        buyerId,
         setupForFutureUse: "off_session",
         metadata: { sample: "saved-cards-mit", subscription_id: subscriptionId },
       },
@@ -169,6 +173,19 @@ async function main(): Promise<void> {
       // Charge the card we just vaulted. This is what makes it a saved-card
       // charge — without `payment_method` the intent has no instrument to bill.
       paymentMethod: { id: token.id },
+      // ⛔ SEND THIS ON EVERY CHARGE AGAINST A SAVED CARD. The SDK's own docs
+      // for this field: "This is a protection, and it only applies when you
+      // send it." The server requires it to match the buyer the card was saved
+      // for and returns 404 payment_method_not_found on a mismatch — which is
+      // what stops a stored card being billed to the WRONG customer.
+      //
+      // Added 2026-09-12. This sample vaulted WITH a buyer and then
+      // charged WITHOUT one, at both call sites — so the one reference
+      // implementation teaching recurring billing omitted the single guard that
+      // catches the realistic failure here: a billing job that joins the wrong
+      // token to the wrong subscriber. Nothing rejects that charge unless this
+      // field is present.
+      buyerId,
       metadata: {
         sample: "saved-cards-mit",
         subscription_id: subscriptionId,
@@ -229,6 +246,10 @@ async function main(): Promise<void> {
       captureMethod: "automatic",
       // Same vaulted card as the anchor — rebilled off-session.
       paymentMethod: { id: token.id },
+      // The buyer match matters MORE here than on the anchor: this is the
+      // unattended path. No cardholder is present to notice a wrong-customer
+      // charge, and this is the call a merchant's billing job makes in a loop.
+      buyerId,
       mit: {
         initiator: "merchant",
         reason: "recurring",
