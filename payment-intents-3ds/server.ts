@@ -116,6 +116,24 @@ function extractRedirectUrl(intent: PaymentIntent): string | null {
 }
 
 // ─── Express app ────────────────────────────────────────────────────────
+// ⛔ Fixed demo amount. A real integration sources this from the cart —
+// SERVER-SIDE.
+//
+// This was read off the request body with a bound:
+//
+//     typeof body.amount === "number" && Number.isInteger(body.amount) && body.amount > 0
+//       ? body.amount : 4999
+//
+// ⚠ A BOUND IS NOT A PRICE CONTROL, and this one reads as though it were.
+// Positive, integer, a number — every value that passes is still a number the
+// BUYER chose, so `curl -d '{"amount":1}'` charges one cent for the $49.99 item.
+// The check only narrows WHICH wrong price an attacker can pick.
+//
+// The only correct shape is that the browser cannot influence the amount at all.
+// The three sibling samples in this repo already do it this way.
+const AMOUNT_MINOR = 4999; // $49.99
+const CURRENCY = "USD";
+
 const app = express();
 
 // Webhook signature verification is byte-for-byte over the RAW body, so mount
@@ -142,16 +160,11 @@ app.post("/charge", async (req: Request, res: Response): Promise<void> => {
       ? body.paymentMethod
       : "vp_pmt_test_3ds_success_sample";
 
-  const amount =
-    typeof body.amount === "number" && Number.isInteger(body.amount) && body.amount > 0
-      ? body.amount
-      : 4999; // minor units → $49.99
-
   const orderId = `ord_${Date.now().toString(36)}`;
 
   const chargeParams: ChargeParams = {
-    amount,
-    currency: "USD",
+    amount: AMOUNT_MINOR,
+    currency: CURRENCY,
     captureMethod: "manual",
     paymentMethod: { id: paymentMethodId },
     returnUrl,
