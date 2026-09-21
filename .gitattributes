@@ -1,0 +1,6 @@
+# Normalize line endings: samples are copied across Windows and macOS machines
+# and a CRLF checkout once showed 53 files "modified" with zero content change.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary

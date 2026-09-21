@@ -147,3 +147,5 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+.claude/*.log
+.claude/*.json

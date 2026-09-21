@@ -1,27 +1,5 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
-  "labels": ["dependencies"],
-  "schedule": ["before 4am on monday"],
-  "packageRules": [
-    {
-      "description": "Group all @vonpay/* SDK bumps into one PR per release cycle",
-      "matchPackagePatterns": ["^@vonpay/"],
-      "groupName": "vonpay sdks",
-      "schedule": ["at any time"],
-      "automerge": false,
-      "labels": ["vonpay-sdk", "high-priority"]
-    },
-    {
-      "description": "Group vonpay-checkout (Python) bumps with the npm SDKs",
-      "matchPackageNames": ["vonpay-checkout"],
-      "groupName": "vonpay sdks",
-      "schedule": ["at any time"],
-      "automerge": false,
-      "labels": ["vonpay-sdk", "high-priority"]
-    }
-  ],
-  "rangeStrategy": "bump",
-  "rebaseWhen": "conflicted",
-  "prConcurrentLimit": 5
+  "description": "Disabled on purpose. The sample folders in this repo are published from the Von Payments SDK repository and compared against it daily; an automated bump PR here would diverge this copy from that source and be reported as drift. Dependency bumps land upstream and are synced here.",
+  "enabled": false
 }

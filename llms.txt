@@ -2,20 +2,20 @@
 
 > Machine-readable index for AI agents integrating the Von Payments Checkout API.
 > Runnable, copy-pasteable sample apps live in this repo. Factual only.
+> Checked against the samples' code and the published SDK types on 2026-09-21.
 
-## Use these SDK versions (authoritative)
+## SDK release lines (checked 2026-09-21)
 
-These are the current published versions. Pin to them; do not assume newer.
+- @vonpay/checkout-node — samples pin ^2 (lockfiles 2.0.0); current 2.6.1 (npm)   # Node / TypeScript server SDK
+- vonpay-checkout — samples pin >=2,<3; current 2.6.1 (PyPI)                       # Python server SDK
+- @vonpay/checkout-mcp — sample pins ^1 (lockfile 1.0.0); current 2.0.1 (npm)      # MCP server for AI-agent runtimes
+- @vonpay/checkout-cli — not pinned by any sample; current 0.5.3 (npm)             # CLI for ad-hoc testing / agent tool use
+- vora.js — CDN only at https://js.vonpay.com/v1/vora.js                          # browser SDK for embedded card fields; NO npm package
 
-- @vonpay/checkout-node — 0.9.1 (npm)        # Node / TypeScript server SDK
-- vonpay-checkout — 0.9.1 (PyPI)             # Python server SDK
-- @vonpay/checkout-cli — 0.4.1 (npm)         # CLI for ad-hoc testing / agent tool use
-- @vonpay/checkout-mcp — 0.4.5 (npm)         # MCP server for AI-agent runtimes
-- vora.js — CDN only at https://js.vonpay.com/v1/vora.js   # browser SDK for embedded card fields; NO npm package
-
-Each sample pins its own version. Always read the sample's package.json
-(Node) or requirements.txt (Python) for the exact version it is built against,
-rather than assuming.
+Never pin a 0.x version: a caret on 0.x locks the minor and the pin can never
+move. Each sample pins its own range: read the sample's package.json (Node)
+or requirements.txt (Python) for what it is built against, rather than
+assuming. "Current" above is a point-in-time reading.
 
 ## Samples (name → purpose → SDK)
 
@@ -37,14 +37,29 @@ rather than assuming.
 1. Webhook signing secret is NOT your API key.
    Verify webhooks with the per-endpoint signing secret `whsec_*` (env
    VON_PAY_WEBHOOK_SECRET), not your `vp_sk_*` API key. The signature header is
-   `x-vonpay-signature: t=<unix>,v1=<hex>` — ONE format. The signed timestamp
-   lives inside the header (the `t=` part); there is no separate timestamp
-   header. Use `vonpay.webhooks.constructEvent(rawBody, signatureHeader, whsec)`
-   (3 args) over the RAW request body — it verifies and parses in one call.
-   Hosted-checkout webhook events today: session.succeeded, session.failed,
-   refund.created. The discrete payment-intents flow surfaces terminal state via
-   payment_intent.succeeded / payment_intent.failed. There is NO session.expired
-   and NO dispute.* event — do not claim them.
+   `x-vonpay-signature: t=<unix-seconds>,v1=<hex>`, ONE format (a second
+   `,v1=<hex>` may appear during secret rotation). The signed timestamp lives
+   inside the header (the `t=` part); there is no separate timestamp header.
+   Use `vonpay.webhooks.constructEvent(rawBody, signatureHeader, whsec)` (3 args)
+   over the RAW request body; it verifies and parses in one call.
+   The event is an envelope `{ id: "vp_evt_*", type, created, livemode,
+   merchant_id, data }`: payload under `data`, merchant id is `merchant_id`.
+   Dedupe on `id`.
+   Event names in the 2.x SDK's typed union: charge.succeeded, charge.failed,
+   charge.refunded, refund.failed, payment_intent.succeeded,
+   payment_intent.failed, payment_intent.cancelled, session.succeeded,
+   session.failed, dispute.created, dispute.won, dispute.lost,
+   application.approved, application.denied, merchant.ready_for_payments,
+   payout.paid, payout.failed.
+   The samples handle charge.* + refund.failed (hosted checkout / refunds) and
+   payment_intent.succeeded / payment_intent.failed (server-driven flow).
+   There is NO session.expired and NO refund.created event; do not claim them
+   (a refund arrives as charge.refunded).
+   Do NOT subscribe an endpoint to session.succeeded / session.failed: they are
+   typed and emitted internally but are not in the merchant subscription
+   catalog, which accepts the key, stores nothing and returns success, so the
+   endpoint receives nothing, forever, with no error. Use charge.* for
+   hosted-checkout fulfilment.
 
 2. Embedded card fields use the CDN <script>, not a processor SDK.
    Load the browser SDK from the CDN <script> at
@@ -54,28 +69,64 @@ rather than assuming.
    card data never touches your server or DOM.
 
 3. Charging a saved card / recurring.
-   To charge a saved card, pass `payment_method: { id: "vp_pmt_*" }` to
-   `paymentIntents.create`. Recurring / merchant-initiated charges use the `mit`
-   block: `{ initiator: "merchant", reason: "recurring", originalTransactionId:
+   Node: pass `paymentMethod: { id: "vp_pmt_*" }` to `paymentIntents.create`
+   (the SDK sends `payment_method` on the wire; Python uses the snake-case
+   names `payment_method`, `buyer_id`). Send `buyerId` on EVERY charge against
+   a saved card: it is a protection that only applies when sent. A mismatch
+   with the buyer the token was vaulted for returns 404
+   payment_method_not_found; omit it and nothing rejects the charge (that is
+   how a billing job bills the wrong customer's card). Recurring /
+   merchant-initiated charges add the `mit` block: `{ initiator: "merchant",
+   reason: "recurring" | "unscheduled" | "installment", originalTransactionId:
    "<anchor vpi_* id>" }`. Vault a reusable card with
    `tokens.create({ setupForFutureUse: "off_session" })`.
 
-## Return URL signature
+4. A return-URL signature is NOT proof of payment.
+   A declined payment is signed just as authentically as an approved one. Do
+   not verify the redirect yourself, and do not try to verify it with an
+   `ss_*` secret: the redirect is signed with a platform-wide secret, so a
+   merchant-side check can never match. Call
+   `sessions.confirmReturn(params, undefined, { expectedSuccessUrl,
+   expectedKeyMode, maxAgeSeconds })` (Python: `sessions.confirm_return`). It
+   reads the session from the server and returns `{ paid, status, reason,
+   sessionId, amount, signatureValid }`. Branch three ways:
+   paid → fulfil once (dedupe on sessionId);
+   reason == "still_pending" → HTTP 200, neutral "confirming your payment"
+   (3-D Secure returns the buyer before the charge settles; do NOT say it
+   failed, they will pay twice);
+   otherwise not paid → HTTP 402.
+   If the lookup throws, log it and show the neutral page. Render
+   `outcome.amount` from the server, never `params.amount` from the URL.
 
-Return-URL signatures are auto-detected. The v2 prefix is `v2.` (a DOT), e.g.
-`?sig=v2.xxxxx` — NOT `v2_`. Verify with the session signing secret (`ss_test_*`
-/ `ss_live_*`), not the API key.
+## Type coverage on the 2.x SDK
+
+`paymentMethod` (2.0.0+), `returnUrl` (2.5.0+), `buyerId`, `mit`,
+`captureMethod`, `sessionId` are typed on `CreatePaymentIntentParams`.
+`PaymentIntent.nextAction` is the structured `{ type: "redirect_to_url",
+redirectToUrl: { url } }` object (or null). `payment_intent.*` events are in
+the typed `WebhookEvent` union. The 0.9-era local type bridges some samples
+still carry are redundant on 2.x; do not copy them into new code.
 
 ## Key prefixes
 
 - vp_sk_test_* / vp_sk_live_* — secret API key (server-only)
 - vp_pk_test_* / vp_pk_live_* — publishable key
-- ss_test_* / ss_live_* — session signing secret (return-URL verification)
 - whsec_* — per-endpoint webhook signing secret (webhook verification)
+- ss_test_* / ss_live_* — session signing secret. Not read by any sample:
+  return URLs are confirmed server-side via sessions.confirmReturn(), not by a
+  merchant-side signature check.
 - vp_pmt_* — saved-card / payment-method token
 - vpi_* — payment intent id
+- vp_evt_* — webhook event id (dedupe key)
 - vp_cs_* — checkout session id
 - vpr_* — refund id
+
+## How this repo is maintained
+
+Sample folders are published here from the Von Payments SDK repository and
+compared against it daily; fixes land there first and are synced here. The
+top-level files (README.md, AGENTS.md, this file, LICENSE, renovate.json,
+.github/) are owned here. Sample bugs: open an issue on this repo.
 
 ## Docs
 
