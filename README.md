@@ -18,12 +18,12 @@ Official runnable sample integrations for the Von Payments Checkout API. Clone a
 | [`payment-intents-3ds`](./payment-intents-3ds) | Node 20+ / Express 5 / TypeScript | **3DS / `requires_action`** — branch on intent status, top-level redirect to the issuer challenge, confirm terminal state from the webhook | Card flows that hit a 3-D Secure challenge; anyone who must handle `requires_action` correctly |
 | [`saved-cards-mit`](./saved-cards-mit) | Node 20+ / TypeScript | **Saved cards + MIT** — vault a card off-session, anchor a cardholder-initiated charge, rebill with the `mit` block | Subscriptions, recurring billing, stored-credential rebills |
 | [`checkout-embedded`](./checkout-embedded) | Node 20+ / Express 5 / TypeScript + CDN `<script>` | **Embedded card fields (Vora Mirror)** — in-page card collection via `vora.js`, tokenize, charge the `vp_pmt_*` token server-side | In-page checkout without a redirect; staying out of PCI scope while keeping your own UI |
-| [`webhooks-node`](./webhooks-node) | Node 20+ / Express 5 / TypeScript | **Webhook receiver** — verify the `t=,v1=` signature with the `whsec_*` secret, idempotent processing, replay-window enforcement | Any integration that needs to react to async events (`session.*`, `refund.created`, `payment_intent.*`) |
+| [`webhooks-node`](./webhooks-node) | Node 20+ / Express 5 / TypeScript | **Webhook receiver** — verify the `t=,v1=` signature with the `whsec_*` secret, idempotent processing, replay-window enforcement | Any integration that needs to react to async events (`charge.*`, `refund.failed`, `payment_intent.*`) |
 | [`agent-mcp`](./agent-mcp) | MCP config (no runtime) | **AI-agent integration** — wire `@vonpay/checkout-mcp` into Claude Code, Cursor, Claude Desktop, or any MCP runtime | Building (or coding with) an agent that creates sessions and drives the payment lifecycle |
 
 Each sample demonstrates the full checkout lifecycle:
 - **Session creation** — server-side, with line items + buyer info
-- **Return URL verification** — both v1 (`?sig=...`) and v2 (`?sig=v2.…`) signatures auto-detected (the v2 prefix is `v2.` with a dot)
+- **Return confirmation** — `sessions.confirmReturn()` reads the session status from the server; the samples branch on `paid` / `still_pending`, never on the redirect's signature (a declined payment is signed just as authentically as an approved one)
 - **Webhook handling** — HMAC-SHA256 signature verification with the per-endpoint `whsec_*` secret + replay window
 - **Production-shaped error handling** — typed `VonPayError` from `@vonpay/checkout-node`, decline-code awareness
 
@@ -35,7 +35,7 @@ Start at [vonpay.com/developers](https://vonpay.com/developers) — the develope
 
 - `vp_sk_test_...` — secret API key (server-only, never ship to client)
 - `vp_pk_test_...` — publishable key
-- `ss_test_...` — session signing secret (verifies return URL signatures)
+- `ss_test_...` — session signing secret (not read by these samples; return URLs are confirmed server-side, see above)
 
 OTP sign-in (any email), no merchant application, no ops approval, no shared demo credentials.
 
@@ -59,7 +59,7 @@ Open `http://localhost:3000`, click pay, complete checkout with a [test card](ht
 ### 3. Read the docs
 
 - **[docs.vonpay.com/quickstart](https://docs.vonpay.com/quickstart)** — full 5-minute walkthrough
-- **[docs.vonpay.com/sdks](https://docs.vonpay.com/sdks)** — `@vonpay/checkout-{node,python,cli,mcp}` SDK references
+- **[docs.vonpay.com/sdks](https://docs.vonpay.com/sdks)** — `@vonpay/checkout-node`, `vonpay-checkout` (Python), `@vonpay/checkout-cli`, `@vonpay/checkout-mcp` references
 - **[docs.vonpay.com/reference](https://docs.vonpay.com/reference)** — API surface, webhooks, errors, test cards
 
 ## Building with AI / agent runtimes
@@ -73,16 +73,16 @@ The samples themselves are written to be agent-paste-friendly: short files, expl
 
 ## SDKs
 
-| SDK | Package | Current version | Used in |
-|---|---|---|---|
-| Node.js | [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) | `0.9.1` | nextjs, express, paybylink-nextjs, platform-integrator-nextjs, payment-intents-node, payment-intents-3ds, saved-cards-mit, checkout-embedded, webhooks-node |
-| Python | [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) | `0.9.1` | flask, payment-intents-python |
-| CLI | [`@vonpay/checkout-cli`](https://www.npmjs.com/package/@vonpay/checkout-cli) | `0.4.1` | install separately for ad-hoc testing or agent-tool use |
-| MCP | [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp) | `0.4.5` | agent-mcp; install in an MCP-aware runtime (Claude Desktop, Cursor, etc.) |
+| SDK | Package | Samples pin | Current release (checked 2026-09-21) | Used in |
+|---|---|---|---|---|
+| Node.js | [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) | `^2` (lockfiles `2.0.0`) | `2.6.1` | nextjs, express, paybylink-nextjs, platform-integrator-nextjs, payment-intents-node, payment-intents-3ds, saved-cards-mit, checkout-embedded, webhooks-node |
+| Python | [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) | `>=2,<3` | `2.6.1` | flask, payment-intents-python |
+| CLI | [`@vonpay/checkout-cli`](https://www.npmjs.com/package/@vonpay/checkout-cli) | — | `0.5.3` | install separately for ad-hoc testing or agent-tool use |
+| MCP | [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp) | `^1` (lockfile `1.0.0`) | `2.0.1` | agent-mcp; install in an MCP-aware runtime (Claude Desktop, Cursor, etc.) |
 
 Embedded card fields load the browser SDK (`vora.js`) from the CDN `<script>` at `https://js.vonpay.com/v1/vora.js` — there is no npm package for it; see [`checkout-embedded`](./checkout-embedded).
 
-During the pre-1.0 window the Node samples pin `@vonpay/checkout-node` to `^0.9.0` and the Python samples pin `vonpay-checkout==0.9.1`. The pins are bumped on each SDK release; [Renovate](./renovate.json) opens the bump PRs. Check a sample's `package.json` / `requirements.txt` for the version it's actually built against.
+The server SDKs are on their `2.x` line. Never pin a `0.x` version: a caret range on `0.x` locks the minor, so the pin can never move. These samples sat on `^0.9.0` for a year that way. Pins are bumped in the SDK repository the samples are published from, then synced here (see [Contributing](#contributing)); check a sample's `package.json` / `requirements.txt` for the range it's actually built against.
 
 ## Roadmap
 
@@ -100,7 +100,7 @@ When the underlying product surfaces these, samples will land here.
 
 ## Contributing
 
-Bug reports + small fixes welcome via PR; larger changes (new samples, new patterns) — open an issue first so we can talk shape before you spend the time.
+The sample folders are published here from the Von Payments SDK repository and compared against it daily, so a fix has to land there first. **A PR that edits a sample folder in this repo will be reported as drift and overwritten by the next sync.** Open an issue here instead (a minimal repro is ideal); we land the fix upstream and sync it. PRs are welcome for the top-level files this repo owns: this README, `AGENTS.md`, `llms.txt`, `LICENSE`, `renovate.json`, `.github/`.
 
 ## License
 
@@ -110,5 +110,5 @@ Bug reports + small fixes welcome via PR; larger changes (new samples, new patte
 
 - **Docs** — [docs.vonpay.com](https://docs.vonpay.com)
 - **Sample bugs / typos / suggestions** — [open an issue on this repo](https://github.com/Von-Payments/vonpay-samples/issues)
-- **SDK bugs** — file on the package's repo: [`checkout-node`](https://github.com/Von-Payments/checkout-node/issues), [`checkout-python`](https://github.com/Von-Payments/checkout-python/issues), [`checkout-cli`](https://github.com/Von-Payments/checkout-cli/issues), [`checkout-mcp`](https://github.com/Von-Payments/checkout-mcp/issues)
+- **SDK bugs** (`@vonpay/checkout-node`, `vonpay-checkout`, `@vonpay/checkout-cli`, `@vonpay/checkout-mcp`) — [open an issue on this repo](https://github.com/Von-Payments/vonpay-samples/issues) with the package name and version in the title; the SDKs are developed in a private repository and triaged from here
 - **Ready to switch from sandbox to live keys?** — book a 15-minute call at [vonpay.com/contact](https://vonpay.com/contact). Live keys require a quick KYB review; sandbox stays free forever.
