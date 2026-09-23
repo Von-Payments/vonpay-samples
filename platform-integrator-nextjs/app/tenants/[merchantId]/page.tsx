@@ -93,8 +93,8 @@ export default async function TenantPage({ params }: Props) {
           </li>
           <li>Server returns a 303 redirect to the Von Payments checkout URL.</li>
           <li>
-            On return, <code>/tenants/{tenant.id}/confirm</code> verifies the
-            signed query string with the tenant&apos;s <code>ss</code> secret.
+            On return, <code>/tenants/{tenant.id}/confirm</code> re-reads the
+            session from the API with the tenant&apos;s own <code>vp_sk</code>.
           </li>
           <li>
             Webhook arrives at <code>/api/webhooks</code> — the handler reads{" "}

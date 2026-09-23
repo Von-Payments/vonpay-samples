@@ -3,7 +3,7 @@
 Server-side **save-a-card, then rebill it** flow: vault a reusable card, run the cardholder-initiated anchor charge, then fire a **merchant-initiated (MIT)** recurring renewal against the card on file. Single-script Node.js demo against the Vonpay Checkout API.
 
 - **Stack:** Node 20+, TypeScript strict, ESM
-- **SDK:** [`@vonpay/checkout-node@^0.9.0`](https://www.npmjs.com/package/@vonpay/checkout-node)
+- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x (`^2`)
 - **Best for:** Subscriptions, recurring billing, scheduled installments, retry/dunning loops — anywhere you charge a saved card while the buyer is not present.
 
 ## What it demonstrates
@@ -25,7 +25,7 @@ A **saved card** is a vault token (`vp_pmt_*`) created with a reusability scope,
 - `"on_session"` — reusable while the buyer is interactively present (e.g. one-click upsells).
 - `"off_session"` — reusable when the buyer is **absent**. Required for recurring / MIT.
 
-To **charge** a saved card, pass it back as `payment_method: { id: token.id }` on `paymentIntents.create` — both the cardholder-initiated anchor and every merchant-initiated renewal reference the same vaulted token this way. (`payment_method` is a documented request field that isn't on the typed `CreatePaymentIntentParams` in 0.9.1 yet, so the sample widens the param type locally via a small `ChargeParams` bridge; it rides through at runtime.)
+To **charge** a saved card, pass it back as `payment_method: { id: token.id }` on `paymentIntents.create` — both the cardholder-initiated anchor and every merchant-initiated renewal reference the same vaulted token this way. In the Node SDK that is `paymentMethod: { id: token.id }` on the typed `CreatePaymentIntentParams`; the SDK sends it as `payment_method` on the wire.
 
 A **merchant-initiated transaction (MIT)** is any charge you drive against that card while the buyer is away — a subscription renewal, a retry, a scheduled installment. Scheme rules require MITs to be tagged and chained to the original cardholder-consent transaction, so `paymentIntents.create` takes an extra `mit` block:
 
@@ -186,4 +186,4 @@ If the token isn't vaulted off-session, the MIT charge would be rejected with `p
 
 ## Tested against
 
-`@vonpay/checkout-node@0.9.1` — typecheck verified 2026-06-05.
+`@vonpay/checkout-node` 2.x — typecheck with `npm run typecheck`.

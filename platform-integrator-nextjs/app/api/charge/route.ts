@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { VonPayCheckout } from "@vonpay/checkout-node";
-import { randomUUID } from "node:crypto";
 import { getTenant, getTenantCredentials } from "@/lib/tenants";
 
 /**
@@ -13,7 +12,7 @@ import { getTenant, getTenantCredentials } from "@/lib/tenants";
  *   amountCents    — charge amount in minor units
  *
  * The handler:
- *   1. Resolves the tenant and looks up their vp_sk / ss credentials
+ *   1. Resolves the tenant and looks up their vp_sk credential
  *   2. Builds a tenant-scoped successUrl
  *   3. Calls vonpay.sessions.create() with an Idempotency-Key
  *   4. 303-redirects to the returned checkoutUrl
@@ -52,11 +51,15 @@ export async function POST(req: NextRequest) {
   // Idempotency-Key — every connector should send one. If the platform
   // retries this charge POST (browser refresh, network blip), the
   // server treats both calls as the same session instead of creating
-  // two. Recommend: stable per logical-charge-attempt, not per-request.
-  // Here: customerId + amount + minute bucket gives same-attempt
-  // collisions but uniqueness across distinct charge intents.
+  // two. Recommend: stable per logical-charge-attempt, not per-request —
+  // so NO random component: a fresh UUID per call would make every retry
+  // a new session and defeat the key. Best is your own charge/order id;
+  // this sample has none, so customerId + amount + minute bucket stands in.
+  // ⚠️ That stand-in MERGES two genuine purchases by the same customer for the
+  // same amount within one minute into one session. Do not ship it: use your
+  // own persisted order id.
   const minuteBucket = Math.floor(Date.now() / 60_000);
-  const idempotencyKey = `${tenantId}:${customerId}:${amountCents}:${minuteBucket}:${randomUUID()}`;
+  const idempotencyKey = `${tenantId}:${customerId}:${amountCents}:${minuteBucket}`;
 
   try {
     const session = await vonpay.sessions.create(

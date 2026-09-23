@@ -41,16 +41,20 @@ export async function POST(req: NextRequest) {
   const linkId = crypto.randomUUID();
 
   try {
-    const session = await vonpay.sessions.create({
-      amount,
-      currency,
-      successUrl: `${baseUrl}/confirm`,
-      // cancelUrl points at the dashboard (not the individual link) so a buyer
-      // who bails still lands somewhere valid even if the server has restarted
-      // and the in-memory store is gone.
-      cancelUrl: `${baseUrl}/links`,
-      lineItems: [{ name: description, quantity: 1, unitAmount: amount }],
-    });
+    const session = await vonpay.sessions.create(
+      {
+        amount,
+        currency,
+        successUrl: `${baseUrl}/confirm`,
+        // cancelUrl points at the dashboard (not the individual link) so a buyer
+        // who bails still lands somewhere valid even if the server has restarted
+        // and the in-memory store is gone.
+        cancelUrl: `${baseUrl}/links`,
+        lineItems: [{ name: description, quantity: 1, unitAmount: amount }],
+      },
+      // Key on YOUR link record's id. Here linkId is made per request, so this only dedupes the SDK's own retry; persist the link first and reuse its id to dedupe a resubmit.
+      { idempotencyKey: `paylink:${linkId}` },
+    );
 
     const link: PayLink = {
       id: linkId,

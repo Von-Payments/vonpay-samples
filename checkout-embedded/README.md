@@ -8,7 +8,7 @@ without sending the buyer to a hosted checkout page.
 - **Stack:** Node 20+ / Express 5 / TypeScript (server, run via `tsx`) +
   a static HTML/JS page (browser)
 - **Von Payments SDKs:**
-  - Server: `@vonpay/checkout-node@^0.9.0`
+  - Server: `@vonpay/checkout-node` 2.x (`^2`)
   - Browser: the VORA Mirror SDK, loaded from
     `https://js.vonpay.com/v1/vora.js` (CDN `<script>` — there is no public
     npm package to install)
@@ -105,11 +105,13 @@ for the full matrix.
 
 For stricter supply-chain control, pin a specific version with
 browser-enforced Subresource Integrity. Copy the exact `integrity` hash for
-the version from [`js.vonpay.com/integrity.json`](https://js.vonpay.com/integrity.json):
+the version from [`js.vonpay.com/integrity.json`](https://js.vonpay.com/integrity.json)
+(the newest release is named under `channels.v1.current`), and replace
+`vX.Y.Z` below with that version:
 
 ```html
 <script
-  src="https://js.vonpay.com/v1.3.2/vora.js"
+  src="https://js.vonpay.com/vX.Y.Z/vora.js"
   integrity="sha384-<hash-from-integrity.json>"
   crossorigin="anonymous"
 ></script>
@@ -130,14 +132,14 @@ the version from [`js.vonpay.com/integrity.json`](https://js.vonpay.com/integrit
 
 ## Notes / current SDK surface
 
-As of `@vonpay/checkout-node@0.9.1`, the server-side token charge in
-`/api/charge` passes the token as `paymentMethod: { id }`, which the SDK
-serializes to the documented `payment_method: { id }` wire field. That field
-is the documented request shape (see
-[Payment Intents](https://docs.vonpay.com/integration/payment-intents)) but
-is not yet part of the exported `CreatePaymentIntentParams` TypeScript type,
-so the sample attaches it through a narrowly-scoped param object. This is the
-documented request, not a placeholder.
+The server-side token charge in `/api/charge` passes the token as
+`paymentMethod: { id }` on the typed `CreatePaymentIntentParams`, which the
+SDK serializes to the documented `payment_method: { id }` wire field (see
+[Payment Intents](https://docs.vonpay.com/integration/payment-intents)).
+
+`/api/create-session` sends an idempotency key derived from the order id, so a
+retry that reuses the same order id returns the same session. This sample creates its order id per request, so in your code create the order first and reuse its id — otherwise a double-click or refresh still makes a second session
+one. Replace the stand-in order id with your own order record's id.
 
 ## Related
 

@@ -89,13 +89,19 @@ app.get("/api/config", (_req: Request, res: Response) => {
  * key. The session carries the amount/currency the embed will charge.
  */
 app.post("/api/create-session", async (_req: Request, res: Response) => {
+  // Stand-in for YOUR order id — in a real app, create the order first and use its id.
+  const orderId = `order_${Date.now().toString(36)}`;
   try {
-    const session = await vonpay.sessions.create({
-      amount: AMOUNT,
-      currency: CURRENCY,
-      // Tag the session so it's identifiable in your dashboard.
-      metadata: { sample: "checkout-embedded" },
-    });
+    const session = await vonpay.sessions.create(
+      {
+        amount: AMOUNT,
+        currency: CURRENCY,
+        // Tag the session so it's identifiable in your dashboard.
+        metadata: { sample: "checkout-embedded", order_id: orderId },
+      },
+      // Key on YOUR order id. Here orderId is made per request, so this only dedupes the SDK's own retry of this call; to dedupe a double-click or refresh, create the order first and reuse its id.
+      { idempotencyKey: `session:${orderId}` },
+    );
     // session.id (vp_cs_*) is the only field the browser needs — it is
     // safe to expose. Do not forward the whole session object.
     res.status(201).json({ session_id: session.id });
@@ -123,29 +129,19 @@ app.post("/api/charge", async (req: Request, res: Response) => {
   }
 
   try {
-    // Charge the token through the SDK's typed paymentIntents.create
-    // (shipped natively since 0.6.0 — don't hand-roll a fetch).
-    //
-    // The payment-method handle travels as `paymentMethod: { id }`, which
-    // the SDK serializes to the documented `payment_method: { id }` wire
-    // field (see docs.vonpay.com/integration/payment-intents). As of
-    // @vonpay/checkout-node@0.9.1 that field is not yet part of the
-    // exported `CreatePaymentIntentParams` type, so we attach it via a
-    // narrowly-scoped param object. This is the documented request shape,
-    // not a workaround value.
-    const params = {
+    // Charge the token through the SDK's typed paymentIntents.create —
+    // don't hand-roll a fetch. The payment-method handle travels as
+    // `paymentMethod: { id }`, which the SDK serializes to the documented
+    // `payment_method: { id }` wire field.
+    const params: CreatePaymentIntentParams = {
       amount: AMOUNT,
       currency: CURRENCY,
       // captureMethod defaults to "automatic" (auth + capture in one call).
       paymentMethod: { id: token },
       metadata: { sample: "checkout-embedded" },
-    } satisfies CreatePaymentIntentParams & {
-      paymentMethod: { id: string };
     };
 
-    const intent = await vonpay.paymentIntents.create(
-      params as CreatePaymentIntentParams,
-    );
+    const intent = await vonpay.paymentIntents.create(params);
     res.status(201).json({ id: intent.id, status: intent.status });
   } catch (err) {
     logUpstreamError("charge", err);

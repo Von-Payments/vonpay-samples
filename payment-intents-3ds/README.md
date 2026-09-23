@@ -3,7 +3,7 @@
 Server-side handling for a payment intent that returns **`requires_action`** — the issuer wants to challenge the buyer (3D Secure / Strong Customer Authentication). Single Express server that creates the intent, redirects the buyer to the bank's challenge page, and confirms the terminal outcome from the webhook.
 
 - **Stack:** Node 20+, TypeScript strict, ESM, Express 5
-- **SDK:** [`@vonpay/checkout-node@^0.9.0`](https://www.npmjs.com/package/@vonpay/checkout-node)
+- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x — **2.5.0 or later** (`^2.5.0`), the first release that types `returnUrl` on `paymentIntents.create`
 - **Best for:** server-driven (Payment Intents) integrations in regions where SCA applies (EU/UK/EEA), or any flow where the issuer may step up to 3DS
 
 ## The 3DS server-side model in one paragraph
@@ -22,14 +22,12 @@ You don't decide whether to challenge — the issuer does. When it wants to, `PO
 
 The intent is created with `captureMethod: "manual"` so a 3DS success lands on `authorized` (funds held, not captured) and the server captures explicitly. Switch to `captureMethod: "automatic"` and the same flow collapses straight to `succeeded`.
 
-## Two SDK-vs-docs gaps this sample handles honestly
+## Reading the challenge URL
 
-These are documented here so you understand the two small workarounds in `server.ts` — they are real gaps in the `0.9.1` typed surface, not invented patterns:
+Everything this sample sends and reads is on the SDK's typed surface — `paymentMethod` and `returnUrl` on `CreatePaymentIntentParams`, and `nextAction` typed as `PaymentIntentNextAction | null`. Two details are worth knowing:
 
-1. **`paymentMethod` / `returnUrl` are documented request fields but not on the `0.9.1` `CreatePaymentIntentParams` type.** The SDK's `paymentIntents.create` deep-converts every parameter to snake_case and forwards it, so these ride through at runtime. The sample widens the param type locally (`ChargeParams`) and narrows back to `CreatePaymentIntentParams` at the call boundary, rather than hand-rolling a `fetch`.
-2. **`PaymentIntent.nextAction` is typed `string | null`, but on a `requires_action` response the runtime value is a structured object.** The API wire shape is `{ type: "redirect_to_url", redirect_to_url: { url } }`, but the SDK camelCases every response key before returning it — so at runtime the field is `redirectToUrl`, not `redirect_to_url`. (The `type` is a string *value*, not a key, so it stays `"redirect_to_url"`.) The sample reads the runtime value defensively (`extractRedirectUrl`) and branches on `type`, so a future `next_action` type can't silently break the redirect.
-
-Both gaps are version-pinned to `@vonpay/checkout-node@0.9.1`; when a later SDK types these fields, drop the local bridges. (Confirmed empirically against the published `0.9.1` package: `paymentIntents.create` forwards `payment_method` / `return_url` on the wire, and returns `next_action` as `{ type, redirectToUrl: { url } }`.)
+1. **The SDK camelCases response keys.** The API wire shape is `{ type: "redirect_to_url", redirect_to_url: { url } }`, but the SDK returns it as `nextAction.redirectToUrl.url`. Reading `nextAction.redirect_to_url.url` gives `undefined`. (The `type` is a string *value*, not a key, so it stays `"redirect_to_url"`.) The sample branches on `type` in `extractRedirectUrl`, so a future `next_action` type can't silently break the redirect.
+2. **`nextAction` is only on the response that creates the payment.** It is not persisted, so a later read or an idempotent replay will not carry it. Redirect from the create response.
 
 ## Setup
 
@@ -79,7 +77,7 @@ The buyer's browser returning to `/3ds/return` tells you the challenge *finished
 - `payment_intent.succeeded` → 3DS passed and funds settled. **This** is the signal to fulfill.
 - `payment_intent.failed` → challenge rejected or charge declined. Do **not** fulfill.
 
-These `payment_intent.*` events are not in the `0.9.1` typed `WebhookEvent` union (which covers the hosted-checkout `session.succeeded` / `session.failed` / `refund.created` shape). They use a different payload shape — discriminator `type`, body nested under `data`, decline reason at `data.failure_reason` (see the [webhook events reference](https://docs.vonpay.com/integration/webhook-events)). The sample still verifies the signature with `vonpay.webhooks.constructEvent` — that gate is fully enforced — then parses the raw body into the documented `payment_intent.*` shape and branches on `type`. Only the TypeScript type is widened; the HMAC check is unchanged. Dedupe redeliveries on the event `id` (`vp_evt_*`) with a durable store.
+`vonpay.webhooks.constructEvent` verifies the signature and returns the typed `WebhookEvent` union, which includes the `payment_intent.*` events — discriminator `type`, body nested under `data`, decline reason at `data.failure_reason` (see the [webhook events reference](https://docs.vonpay.com/integration/webhook-events)). Switching on `event.type` narrows `event.data`, so there is no second parse and no widened type. Dedupe redeliveries on the event `id` (`vp_evt_*`) with a durable store.
 
 ### Testing the webhook locally
 
@@ -121,4 +119,4 @@ The default base URL is production (`checkout.vonpay.com`). A `vp_sk_test_` key 
 
 ## Tested against
 
-`@vonpay/checkout-node@0.9.1` — typecheck (`tsc --noEmit`) verified 2026-06-05. End-to-end 3DS smoke (charge → redirect → challenge → `payment_intent.succeeded` webhook) requires a `vp_sk_test_…` key plus a publicly reachable `/webhooks` URL.
+`@vonpay/checkout-node` 2.x (2.5.0 or later) — typecheck with `npm run typecheck`. End-to-end 3DS smoke (charge → redirect → challenge → `payment_intent.succeeded` webhook) requires a `vp_sk_test_…` key plus a publicly reachable `/webhooks` URL.

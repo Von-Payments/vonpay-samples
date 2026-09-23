@@ -3,7 +3,7 @@
 Server-side payment intent flow: **authorize → capture → partial refund**, plus an idempotency replay. Single-script Node.js demo against the Vonpay Checkout API.
 
 - **Stack:** Node 20+, TypeScript strict, ESM
-- **SDK:** [`@vonpay/checkout-node@^0.9.0`](https://www.npmjs.com/package/@vonpay/checkout-node)
+- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x (`^2`)
 - **Best for:** B2B / invoicing flows, headless billing where the merchant server drives the lifecycle (no hosted checkout)
 
 ## What it demonstrates
@@ -98,4 +98,4 @@ Each step is wrapped in `try`/`catch`. Every lifecycle call throws a typed `VonP
 
 ## Tested against
 
-`@vonpay/checkout-node@0.9.1` — typecheck verified 2026-06-05. Live sandbox smoke (auth → capture → refund → idempotency replay) requires a `vp_sk_test_…` key.
+`@vonpay/checkout-node` 2.x — typecheck with `npm run typecheck`. Live sandbox smoke (auth → capture → refund → idempotency replay) requires a `vp_sk_test_…` key.

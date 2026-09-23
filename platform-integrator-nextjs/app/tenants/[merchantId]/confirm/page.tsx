@@ -21,9 +21,8 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
   }
 
   const baseUrl = process.env.BASE_URL ?? "http://localhost:3000";
-  // `ss` is deliberately NOT destructured: the confirm page no longer verifies
-  // the return signature (see the note at `confirmReturn` below). It is still
-  // used for webhooks, where the per-tenant secret IS the right one.
+  // Only the API key is needed here: the confirm page does not verify the
+  // return signature (see the note at `confirmReturn` below).
   const { vpSk } = getTenantCredentials(merchantId);
 
   // Confirm SERVER-SIDE against the tenant's own credentials.

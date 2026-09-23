@@ -20,11 +20,10 @@
  *   POST /webhooks     Verify the signature, then act on payment_intent.* to
  *                      confirm the post-challenge terminal state.
  *
- * Verified against @vonpay/checkout-node@0.9.1 + the Payment Intents 3DS docs.
- * See the README for the two SDK-vs-docs gaps this sample works around
- * (`paymentMethod` is not yet on the typed CreatePaymentIntentParams, and
- * `PaymentIntent.nextAction` is typed `string | null` while the wire payload
- * is the `{ type, redirect_to_url }` object).
+ * Written against @vonpay/checkout-node 2.x — 2.5.0 or later, which is the
+ * first release that types `returnUrl` on `paymentIntents.create`. Every field
+ * this sample sends and reads is on the SDK's typed surface: no casts, no local
+ * type bridges.
  */
 import express, { type Request, type Response } from "express";
 import {
@@ -32,6 +31,7 @@ import {
   VonPayError,
   type CreatePaymentIntentParams,
   type PaymentIntent,
+  type WebhookEvent,
 } from "@vonpay/checkout-node";
 
 // ─── Config ─────────────────────────────────────────────────────────────
@@ -68,50 +68,27 @@ const returnUrl =
 
 const vonpay = new VonPayCheckout({ apiKey, baseUrl });
 
-// ─── Type bridges for two documented-but-not-yet-typed wire shapes ───────
+// ─── Reading the 3DS redirect off the intent ──────────────────────────────
 //
-// 1. `payment_method` + `return_url` are documented request fields on
-//    POST /v1/payment_intents (see the Payment Intents guide), but the 0.9.1
-//    typed `CreatePaymentIntentParams` does not include them yet. The SDK's
-//    `paymentIntents.create` deep-converts every param to snake_case and
-//    forwards it, so passing them through works at runtime — we widen the
-//    param type locally and narrow back at the call boundary.
-interface ChargeParams extends CreatePaymentIntentParams {
-  /** vp_pmt_* token from POST /v1/tokens (or VORA Mirror's submit()). */
-  paymentMethod: { id: string };
-  /** Absolute URL the issuer challenge returns the buyer to. */
-  returnUrl: string;
-}
-
-// 2. `PaymentIntent.nextAction` is typed `string | null` in 0.9.1, but on a
-//    `requires_action` response the runtime value is the structured object
-//    below. The API wire shape is `{ type, redirect_to_url: { url } }`, but the
-//    SDK camelCases every response key (except `metadata`) before returning —
-//    so the runtime field is `redirectToUrl`, NOT `redirect_to_url`. The `type`
-//    is a string VALUE (not a key) so it stays `"redirect_to_url"`. We read the
-//    runtime value defensively and branch on `type` so a future action type
-//    can't silently break the redirect.
-interface RedirectToUrlAction {
-  type: "redirect_to_url";
-  // SDK-camelCased key (wire is `redirect_to_url`).
-  redirectToUrl: { url: string };
-}
-
+// On `requires_action`, `intent.nextAction` is a `PaymentIntentNextAction`.
+// The API wire shape is `{ type, redirect_to_url: { url } }`, but the SDK
+// camelCases every response KEY (except `metadata`) — so read
+// `nextAction.redirectToUrl.url`, NOT `redirect_to_url.url` (which is
+// `undefined`). The `type` is a string VALUE, not a key, so it stays
+// `"redirect_to_url"`. We branch on `type` so a future action type can't
+// silently break the redirect.
+//
+// ⚠️ Capture it from THIS response. `nextAction` is returned only on the call
+// that creates the payment; it is not persisted, so a later read or an
+// idempotent replay will not carry it.
 function extractRedirectUrl(intent: PaymentIntent): string | null {
-  // The typed field is `string | null`; the live shape is an object. Treat the
-  // runtime value as unknown and validate before trusting it.
-  const action = intent.nextAction as unknown;
-  if (
-    action !== null &&
-    typeof action === "object" &&
-    (action as RedirectToUrlAction).type === "redirect_to_url"
-  ) {
-    const url = (action as RedirectToUrlAction).redirectToUrl?.url;
-    // The URL comes from a trusted source (the API), but we still validate the
-    // scheme before handing it to res.redirect — never redirect a browser to a
-    // javascript:/data: URL even if a response were ever malformed.
-    if (typeof url === "string" && /^https?:\/\//i.test(url)) return url;
-  }
+  const action = intent.nextAction;
+  if (action?.type !== "redirect_to_url") return null;
+  const url = action.redirectToUrl?.url;
+  // The URL comes from a trusted source (the API), but we still validate the
+  // scheme before handing it to res.redirect — never redirect a browser to a
+  // javascript:/data: URL even if a response were ever malformed.
+  if (typeof url === "string" && /^https?:\/\//i.test(url)) return url;
   return null;
 }
 
@@ -162,7 +139,7 @@ app.post("/charge", async (req: Request, res: Response): Promise<void> => {
 
   const orderId = `ord_${Date.now().toString(36)}`;
 
-  const chargeParams: ChargeParams = {
+  const chargeParams: CreatePaymentIntentParams = {
     amount: AMOUNT_MINOR,
     currency: CURRENCY,
     captureMethod: "manual",
@@ -173,13 +150,9 @@ app.post("/charge", async (req: Request, res: Response): Promise<void> => {
 
   let intent: PaymentIntent;
   try {
-    intent = await vonpay.paymentIntents.create(
-      // Narrow the widened params back to the SDK's type at the boundary. The
-      // extra fields ride through the SDK's snake_case forwarding (see the
-      // ChargeParams note above).
-      chargeParams as CreatePaymentIntentParams,
-      { idempotencyKey: `${orderId}:authorize` },
-    );
+    intent = await vonpay.paymentIntents.create(chargeParams, {
+      idempotencyKey: `${orderId}:authorize`,
+    });
   } catch (err) {
     logVonPayError("charge.create", err);
     res.status(502).json({ error: "Could not create payment intent" });
@@ -297,29 +270,9 @@ app.get("/3ds/return", (req: Request, res: Response): void => {
 //
 // `constructEvent` verifies the signature + replay window and throws on any
 // failure (the verification gate this sample relies on). It returns the SDK's
-// typed WebhookEvent union (session.* / refund.created), which is shaped for
-// the hosted-checkout family. The discrete-lifecycle `payment_intent.*` events
-// use a DIFFERENT payload shape — discriminator `type`, body nested under
-// `data`, decline reason at `data.failure_reason` — and are not in the SDK's
-// typed union in 0.9.1. So we verify with constructEvent, then read the
-// payment_intent.* shape off a parallel parse of the same raw bytes. The HMAC
-// check is unchanged; only the TypeScript type is widened.
-interface PaymentIntentEvent {
-  /** Webhook event id (vp_evt_*) — use this to dedupe redeliveries. */
-  id?: string;
-  /** Discriminator: "payment_intent.succeeded" | ".failed" | ".cancelled" | … */
-  type?: string;
-  merchant_id?: string;
-  data?: {
-    session_id?: string | null;
-    transaction_id?: string;
-    amount?: number;
-    currency?: string;
-    /** Present on payment_intent.failed — generic reason (e.g. card_declined). */
-    failure_reason?: string;
-  };
-}
-
+// typed `WebhookEvent` union, which includes the `payment_intent.*` family:
+// discriminator `type`, body nested under `data`, decline reason at
+// `data.failure_reason`. Switching on `event.type` narrows `event.data`.
 app.post("/webhooks", (req: Request, res: Response): void => {
   const signature = req.headers["x-vonpay-signature"];
   if (typeof signature !== "string") {
@@ -327,11 +280,10 @@ app.post("/webhooks", (req: Request, res: Response): void => {
     return;
   }
 
+  let event: WebhookEvent;
   try {
-    // Verify signature + replay window (throws on failure). We discard the
-    // typed return value here because the payment_intent.* family is shaped
-    // differently from the SDK's union — we re-read it below.
-    vonpay.webhooks.constructEvent(req.body as Buffer, signature, webhookSecret);
+    // Verify signature + replay window (throws on failure).
+    event = vonpay.webhooks.constructEvent(req.body as Buffer, signature, webhookSecret);
   } catch (err) {
     // 400 (not 200) so the delivery engine retries. Log only err.message — the
     // full error object can carry signature/HMAC bytes in its diagnostic
@@ -345,17 +297,6 @@ app.post("/webhooks", (req: Request, res: Response): void => {
     return;
   }
 
-  // Signature is verified — now read the event payload in its real shape.
-  let event: PaymentIntentEvent;
-  try {
-    const raw = (req.body as Buffer).toString("utf8");
-    event = JSON.parse(raw) as PaymentIntentEvent;
-  } catch {
-    // Verified-but-unparseable body should never happen. Ack so we don't loop.
-    res.status(200).json({ received: true });
-    return;
-  }
-
   switch (event.type) {
     case "payment_intent.succeeded":
       // 3DS passed (or no challenge was needed) and funds settled. THIS is the
@@ -365,7 +306,7 @@ app.post("/webhooks", (req: Request, res: Response): void => {
         route: "/webhooks",
         type: event.type,
         eventId: event.id,
-        transactionId: event.data?.transaction_id,
+        transactionId: event.data.transaction_id,
         msg: "fulfill_order",
       });
       break;
@@ -375,20 +316,20 @@ app.post("/webhooks", (req: Request, res: Response): void => {
         route: "/webhooks",
         type: event.type,
         eventId: event.id,
-        transactionId: event.data?.transaction_id,
-        failureReason: event.data?.failure_reason,
+        transactionId: event.data.transaction_id,
+        failureReason: event.data.failure_reason,
         msg: "do_not_fulfill",
       });
       break;
     default:
       // Forward-compatible: ack unknown events so they aren't redelivered. New
       // event types can ship without an SDK bump — never 5xx one you don't know.
-      // This includes session.* / refund.created (handled in other samples) and
+      // This includes charge.* / refund.* (handled in other samples) and
       // payment_intent.cancelled.
       console.log({
         route: "/webhooks",
         msg: "event_ignored",
-        type: event.type ?? "(none)",
+        type: event.type,
       });
   }
 

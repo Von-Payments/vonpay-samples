@@ -1,6 +1,7 @@
 """Von Payments Checkout — Flask sample app."""
 
 import os
+import time
 
 from flask import Flask, redirect, request, jsonify
 from markupsafe import escape
@@ -29,9 +30,14 @@ def index():
 
 @app.post("/checkout")
 def create_checkout():
+    # Stand-in for YOUR order id — in a real app, create the order first and use its id.
+    order_id = f"order_{int(time.time() * 1000):x}"
     session = checkout.sessions.create(
         amount=1499, currency="USD", country="US",
         success_url=f"{BASE_URL}/success",
+        metadata={"order_id": order_id},
+        # Key on YOUR order id. Here orderId is made per request, so this only dedupes the SDK's own retry of this call; to dedupe a double-click or refresh, create the order first and reuse its id.
+        idempotency_key=f"session:{order_id}",
     )
     return redirect(session.checkout_url)
 

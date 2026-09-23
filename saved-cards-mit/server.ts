@@ -20,7 +20,7 @@
  * redirect here — the merchant server drives the whole lifecycle.
  *
  * SDK surface: every call below is a typed method on `@vonpay/checkout-node`
- * (>= 0.6.0): `capabilities.get`, `tokens.create`, `paymentIntents.create`
+ * (2.x): `capabilities.get`, `tokens.create`, `paymentIntents.create`
  * (incl. the `mit` block). No raw fetch, no hand-rolled HMAC.
  */
 import {
@@ -31,20 +31,6 @@ import {
   type PaymentIntent,
   type Token,
 } from "@vonpay/checkout-node";
-
-// ─── Type bridge for a documented-but-not-yet-typed wire field ────────────
-//
-// `payment_method` is a documented request field on POST /v1/payment_intents
-// (it is how the charge references the vaulted card), but the 0.9.1 typed
-// `CreatePaymentIntentParams` does not include it yet. `paymentIntents.create`
-// deep-converts every param to snake_case and forwards it, so passing it
-// through works at runtime — we widen the param type locally. Without this the
-// vaulted token would never reach the charge and the renewal would be rejected
-// with `payment_method_required` / `payment_method_consent_missing`.
-interface ChargeParams extends CreatePaymentIntentParams {
-  /** vp_pmt_* token from `tokens.create` (or Vora Mirror's submit()). */
-  paymentMethod: { id: string };
-}
 
 const SECRET_KEY = process.env["VON_PAY_SECRET_KEY"];
 if (!SECRET_KEY) {
@@ -166,7 +152,7 @@ async function main(): Promise<void> {
   // id becomes the anchor for every later merchant-initiated renewal.
   let anchor: PaymentIntent;
   try {
-    const anchorParams: ChargeParams = {
+    const anchorParams: CreatePaymentIntentParams = {
       amount: 2999,
       currency: "USD",
       captureMethod: "automatic",
@@ -179,12 +165,9 @@ async function main(): Promise<void> {
       // for and returns 404 payment_method_not_found on a mismatch — which is
       // what stops a stored card being billed to the WRONG customer.
       //
-      // Added 2026-09-12. This sample vaulted WITH a buyer and then
-      // charged WITHOUT one, at both call sites — so the one reference
-      // implementation teaching recurring billing omitted the single guard that
-      // catches the realistic failure here: a billing job that joins the wrong
-      // token to the wrong subscriber. Nothing rejects that charge unless this
-      // field is present.
+      // The realistic failure this catches is a billing job that joins the
+      // wrong token to the wrong subscriber. Nothing rejects that charge unless
+      // this field is present.
       buyerId,
       metadata: {
         sample: "saved-cards-mit",
@@ -240,7 +223,7 @@ async function main(): Promise<void> {
 
   let renewal: PaymentIntent;
   try {
-    const renewalParams: ChargeParams = {
+    const renewalParams: CreatePaymentIntentParams = {
       amount: 2999,
       currency: "USD",
       captureMethod: "automatic",

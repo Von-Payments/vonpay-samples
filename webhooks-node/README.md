@@ -3,7 +3,7 @@
 A standalone reference integration showing how to **receive, verify, and process** Von Payments webhooks. The other samples in this repo show how to *send* API calls — this one shows how to handle the asynchronous events Von Payments delivers back to you.
 
 - **Stack:** Node 20+, Express 5, TypeScript strict, ESM
-- **SDK:** [`@vonpay/checkout-node@^0.9.0`](https://www.npmjs.com/package/@vonpay/checkout-node)
+- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x (`^2`)
 - **Best for:** any merchant or integrator that needs to react to settlement, failures, or refunds
 
 ## What it demonstrates
@@ -148,4 +148,4 @@ There is no `session.expired` / "buyer abandoned the checkout" event today. The 
 
 ## Tested against
 
-`@vonpay/checkout-node@0.9.1` · Node 20+ · Express 5
+`@vonpay/checkout-node` 2.x · Node 20+ · Express 5

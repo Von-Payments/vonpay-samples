@@ -12,12 +12,12 @@ This project uses [Von Payments](https://vonpay.com) for hosted checkout, embedd
 
 ## SDKs
 
-- **Node:** `@vonpay/checkout-node@0.9.1` (npm; check `npm view @vonpay/checkout-node version` for latest)
-- **Python:** `vonpay-checkout==0.9.1` (PyPI; check `pip index versions vonpay-checkout` for latest)
-- **Browser fields:** `https://js.vonpay.com/v1/vora.js` (auto-update) or `https://js.vonpay.com/v1.3.3/vora.js` (pinned)
+- **Node:** `@vonpay/checkout-node` 2.x (npm; check `npm view @vonpay/checkout-node version` for latest)
+- **Python:** `vonpay-checkout` 2.x (PyPI; check `pip index versions vonpay-checkout` for latest)
+- **Browser fields:** `https://js.vonpay.com/v1/vora.js` (auto-update) or `https://js.vonpay.com/vX.Y.Z/vora.js` (pinned — the newest version is named under `channels.v1.current` in `https://js.vonpay.com/integrity.json`)
 - **React wrapper:** `@vonpay/vora-react` — provider + hook for the browser fields (not yet published to npm)
-- **MCP server (for agents):** `@vonpay/checkout-mcp@0.4.5` — adds 11 tools to any MCP-compatible client (Claude Code, Cursor, Claude Desktop, Continue.dev, Windsurf, custom runtimes). Same surface as the SDK.
-- **CLI:** `@vonpay/checkout-cli@0.4.1` — local dev, webhook tail, signature verify. `--json` everywhere; `doctor --for-llm` for agent self-diagnosis.
+- **MCP server (for agents):** `@vonpay/checkout-mcp` 2.x — adds 11 tools to any MCP-compatible client (Claude Code, Cursor, Claude Desktop, Continue.dev, Windsurf, custom runtimes). Same surface as the SDK.
+- **CLI:** `@vonpay/checkout-cli` (check `npm view @vonpay/checkout-cli version` for latest) — local dev, webhook tail, signature verify. `--json` everywhere; `doctor --for-llm` for agent self-diagnosis.
 
 ## SDK surface (Node + Python — same shape, snake-cased in Python)
 
@@ -26,7 +26,7 @@ This project uses [Von Payments](https://vonpay.com) for hosted checkout, embedd
   - `client.sessions.get(id)`
   - `client.sessions.validate(params)` — dry-run validation
 - **Payment intents** — discrete-lifecycle (recurring / MIT / saved cards / fulfillment-on-ship):
-  - `client.paymentIntents.create({ amount, currency, captureMethod?, mit? }, { idempotencyKey? })`
+  - `client.paymentIntents.create({ amount, currency, captureMethod?, paymentMethod?, returnUrl?, mit? }, { idempotencyKey? })` — on `requires_action`, send the buyer to `intent.nextAction.redirectToUrl.url` (the SDK camelCases response keys)
   - `client.paymentIntents.capture(id, { amountToCapture? })` — full or partial
   - `client.paymentIntents.void(id)` — pre-capture cancellation
 - **Refunds** — post-settlement:
@@ -61,6 +61,8 @@ Available under the `vonpay_checkout_*` prefix:
 - `health`, `list_test_cards`, `diagnose_error`
 
 Each tool's input is validated by Zod; errors include the same `llmHint` + `nextAction` fields as the SDK.
+
+**Live keys:** with a `vp_sk_live_*` key, `create_payment_intent`, `capture_payment_intent`, `void_payment_intent`, `create_refund`, and `create_token` (when saving a reusable card) refuse unless the call passes `confirmLive: true`. Only set it after the human has explicitly approved THAT specific call — approval never carries over to the next call. Never set it on your own initiative. Sandbox keys are never gated.
 
 ## Discovery (unauthenticated)
 
