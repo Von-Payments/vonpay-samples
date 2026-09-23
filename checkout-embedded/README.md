@@ -1,8 +1,8 @@
-# Von Payments Checkout — Embedded (VORA Mirror) sample
+# Von Payments Checkout - Embedded (VORA Mirror) sample
 
 Embedded card collection: the buyer stays on **your** domain and the card
 field is rendered inside a Von Payments-owned iframe (VORA Mirror). Card
-data never touches your server or your DOM, so you stay out of PCI scope —
+data never touches your server or your DOM, so you stay out of PCI scope -
 without sending the buyer to a hosted checkout page.
 
 - **Stack:** Node 20+ / Express 5 / TypeScript (server, run via `tsx`) +
@@ -10,7 +10,7 @@ without sending the buyer to a hosted checkout page.
 - **Von Payments SDKs:**
   - Server: `@vonpay/checkout-node` 2.x (`^2`)
   - Browser: the VORA Mirror SDK, loaded from
-    `https://js.vonpay.com/v1/vora.js` (CDN `<script>` — there is no public
+    `https://js.vonpay.com/v1/vora.js` (CDN `<script>` - there is no public
     npm package to install)
 - **What it demonstrates:** create a session server-side, mount the card
   iframe in the browser, tokenize on submit, and handle all three submit
@@ -53,7 +53,7 @@ The handshake:
 > `token`. Which flow a session uses is decided by your checkout
 > configuration; the result shape tells you which one ran.
 
-The client result is a **UX signal only** — it tells the browser the embed
+The client result is a **UX signal only** - it tells the browser the embed
 accepted the card, not that money has settled. Confirm settlement
 server-side via the [webhook](https://docs.vonpay.com/integration/webhooks)
 before you fulfill the order.
@@ -66,8 +66,8 @@ Sign up at [app.vonpay.com](https://app.vonpay.com), complete OTP, then
 `/dashboard/developers` → **Create sandbox**. You need two keys for the
 embedded flow (both shown in the banner once):
 
-- `vp_sk_test_...` — secret key (server-only)
-- `vp_pk_test_...` — publishable key (shipped to the browser)
+- `vp_sk_test_...` - secret key (server-only)
+- `vp_pk_test_...` - publishable key (shipped to the browser)
 
 ### 2. Configure and run
 
@@ -121,7 +121,7 @@ the version from [`js.vonpay.com/integrity.json`](https://js.vonpay.com/integrit
 
 - **Two keys, two scopes.** The secret key (`vp_sk_*`) stays on the server
   and creates sessions / charges tokens. The publishable key (`vp_pk_*`) is
-  safe in the browser — it can only authenticate VORA's public endpoints,
+  safe in the browser - it can only authenticate VORA's public endpoints,
   never move money on its own. The SDK throws if you pass a secret key to
   `new Vora(...)`.
 - **Do not add a card-processor SDK.** The card field is a Von Payments
@@ -138,7 +138,7 @@ SDK serializes to the documented `payment_method: { id }` wire field (see
 [Payment Intents](https://docs.vonpay.com/integration/payment-intents)).
 
 `/api/create-session` sends an idempotency key derived from the order id, so a
-retry that reuses the same order id returns the same session. This sample creates its order id per request, so in your code create the order first and reuse its id — otherwise a double-click or refresh still makes a second session
+retry that reuses the same order id returns the same session. This sample creates its order id per request, so in your code create the order first and reuse its id - otherwise a double-click or refresh still makes a second session
 one. Replace the stand-in order id with your own order record's id.
 
 ## Related
@@ -148,4 +148,4 @@ one. Replace the stand-in order id with your own order record's id.
 - [Tokenization model](https://docs.vonpay.com/mirror/tokenization)
 - [Payment Intents reference](https://docs.vonpay.com/integration/payment-intents)
 - [Webhooks](https://docs.vonpay.com/integration/webhooks)
-- `checkout-express` — hosted-redirect equivalent (no embedded fields)
+- `checkout-express` - hosted-redirect equivalent (no embedded fields)

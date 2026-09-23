@@ -141,6 +141,12 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
     return;
   }
 
+  // A "Send test event" delivery is signed and can carry a real order's ids: acknowledge it and do nothing else.
+  if (event.test_event === true) {
+    res.status(200).json({ received: true });
+    return;
+  }
+
   // Idempotency guard. A redelivery (after a transient 5xx, a manual resend, or
   // during a secret rotation) carries the same logical event — dedupe so a
   // retry does not double-fulfill.

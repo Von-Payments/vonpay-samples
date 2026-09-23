@@ -20,8 +20,9 @@
  *   POST /webhooks     Verify the signature, then act on payment_intent.* to
  *                      confirm the post-challenge terminal state.
  *
- * Written against @vonpay/checkout-node 2.x — 2.5.0 or later, which is the
- * first release that types `returnUrl` on `paymentIntents.create`. Every field
+ * Written against @vonpay/checkout-node 2.x — 2.7.0 or later. 2.5.0 is the
+ * first release that types `returnUrl` on `paymentIntents.create`, and 2.7.0
+ * the first that types `test_event` on webhook events. Every field
  * this sample sends and reads is on the SDK's typed surface: no casts, no local
  * type bridges.
  */
@@ -294,6 +295,12 @@ app.post("/webhooks", (req: Request, res: Response): void => {
       error: err instanceof Error ? err.message : String(err),
     });
     res.status(400).json({ error: "Invalid signature" });
+    return;
+  }
+
+  // A "Send test event" delivery is signed and can carry a real order's ids: acknowledge it and do nothing else.
+  if (event.test_event === true) {
+    res.status(200).json({ received: true });
     return;
   }
 

@@ -21,6 +21,11 @@ export async function POST(req: NextRequest) {
   try {
     const event = vonpay.webhooks.constructEvent(body, signature, webhookSecret);
 
+    // A "Send test event" delivery is signed and can carry a real order's ids: acknowledge it and do nothing else.
+    if (event.test_event === true) {
+      return NextResponse.json({ received: true });
+    }
+
     let nextStatus: LinkStatus | undefined;
     let transactionId: string | undefined;
     let sessionId: string | undefined;

@@ -1,2 +1,2 @@
 flask>=3.0
-vonpay-checkout>=2,<3
+vonpay-checkout>=2.7,<3

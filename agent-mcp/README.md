@@ -1,18 +1,18 @@
-# Von Payments × AI agents — MCP integration sample
+# Von Payments × AI agents - MCP integration sample
 
-Wire any MCP-compatible AI agent into Von Payments. After this walkthrough, your agent can autonomously create sessions, run payment intents through their full lifecycle (create / capture / void / refund / tokenize), diagnose errors with structured remediation, and check API health — all from inside your chat surface, IDE, or your own custom agent runtime.
+Wire any MCP-compatible AI agent into Von Payments. After this walkthrough, your agent can autonomously create sessions, run payment intents through their full lifecycle (create / capture / void / refund / tokenize), diagnose errors with structured remediation, and check API health - all from inside your chat surface, IDE, or your own custom agent runtime.
 
 **Confirmed with:**
-- [Claude Code](https://claude.com/claude-code) — Anthropic's CLI agent
-- [Cursor](https://cursor.com) — AI-first code editor
-- [Claude Desktop](https://claude.ai/download) — Anthropic's desktop chat app
-- [Continue.dev](https://continue.dev) — open-source AI assistant for VS Code / JetBrains
-- [Windsurf](https://windsurf.com) — Codeium's AI IDE
+- [Claude Code](https://claude.com/claude-code) - Anthropic's CLI agent
+- [Cursor](https://cursor.com) - AI-first code editor
+- [Claude Desktop](https://claude.ai/download) - Anthropic's desktop chat app
+- [Continue.dev](https://continue.dev) - open-source AI assistant for VS Code / JetBrains
+- [Windsurf](https://windsurf.com) - Codeium's AI IDE
 - Any custom runtime that implements the [Model Context Protocol](https://modelcontextprotocol.io) (stdio transport)
 
 The wiring is identical across all of them. Only the config-file path changes.
 
-This sample is read-only — no code to run, no server to host. Five files (`README.md`, `CLAUDE.md`, `.claude.json.example`, `.env.example`, `package.json`) you reference from your own project. The agent does the work.
+This sample is read-only - no code to run, no server to host. Five files (`README.md`, `CLAUDE.md`, `.claude.json.example`, `.env.example`, `package.json`) you reference from your own project. The agent does the work.
 
 ## 5-minute setup
 
@@ -20,7 +20,7 @@ This sample is read-only — no code to run, no server to host. Five files (`REA
 
 Sign in at [app.vonpay.com](https://app.vonpay.com/?next=/dashboard/developers) with OTP. Click **Activate Vora Sandbox**. Copy the secret key (`vp_sk_test_…`).
 
-No merchant application required — sandbox is free.
+No merchant application required - sandbox is free.
 
 ### 2. Install the MCP server
 
@@ -28,7 +28,7 @@ No merchant application required — sandbox is free.
 npm install -g @vonpay/checkout-mcp
 ```
 
-You don't need to launch it manually — the MCP client (whichever one you use) starts it per session via stdio. If you'd rather not install globally, use `npx -y @vonpay/checkout-mcp` in the config below; the runtime fetches it on demand.
+You don't need to launch it manually - the MCP client (whichever one you use) starts it per session via stdio. If you'd rather not install globally, use `npx -y @vonpay/checkout-mcp` in the config below; the runtime fetches it on demand.
 
 ### 3. Wire it into your MCP client
 
@@ -64,7 +64,7 @@ Same `mcpServers` block.
 
 #### Continue.dev
 
-Edit `~/.continue/config.json`. Continue supports MCP servers — same `mcpServers` shape under `experimental.modelContextProtocolServer.transport` (Continue ≥0.9.x).
+Edit `~/.continue/config.json`. Continue supports MCP servers - same `mcpServers` shape under `experimental.modelContextProtocolServer.transport` (Continue ≥0.9.x).
 
 #### Custom MCP client / your own agent runtime
 
@@ -77,14 +77,14 @@ A copy-paste-ready version of the standard `mcpServers` block is in [`.claude.js
 Copy [`CLAUDE.md`](CLAUDE.md) into the root of any project that uses Von Payments. It teaches the agent the auth scheme, key prefixes, SDK packages and how to check their current versions, error envelope shape, MCP tools, and discovery endpoints, all in one file the agent reads on project open.
 
 File-name conventions by client:
-- **Claude Code, Cursor, Continue.dev** — `CLAUDE.md` at project root, read automatically
-- **Other agent runtimes** — save as `AGENTS.md`, `AI-CONTEXT.md`, or whatever your client's convention is. The content is plain Markdown; the file name is just where your client looks for it.
+- **Claude Code, Cursor, Continue.dev** - `CLAUDE.md` at project root, read automatically
+- **Other agent runtimes** - save as `AGENTS.md`, `AI-CONTEXT.md`, or whatever your client's convention is. The content is plain Markdown; the file name is just where your client looks for it.
 
 ### 5. Restart the client. Confirm tools appear.
 
 In Claude Code: type `/mcp`. You should see `vonpay-checkout` with 11 tools. In Cursor: the Tools panel shows the same list. In Claude Desktop: the 🔌 icon appears in the input box.
 
-If nothing shows up, check the MCP server logs — usually a missing or malformed `VON_PAY_SECRET_KEY`.
+If nothing shows up, check the MCP server logs - usually a missing or malformed `VON_PAY_SECRET_KEY`.
 
 ## What the agent can do
 
@@ -102,7 +102,7 @@ If nothing shows up, check the MCP server logs — usually a missing or malforme
 
 | Tool | What it does |
 |---|---|
-| `vonpay_checkout_create_payment_intent` | Create a payment intent — recurring, MIT, saved-card flows |
+| `vonpay_checkout_create_payment_intent` | Create a payment intent - recurring, MIT, saved-card flows |
 | `vonpay_checkout_capture_payment_intent` | Capture authorized funds (full or partial) |
 | `vonpay_checkout_void_payment_intent` | Release an auth hold pre-capture |
 | `vonpay_checkout_create_refund` | Refund a captured intent (full or partial) |
@@ -114,7 +114,7 @@ If nothing shows up, check the MCP server logs — usually a missing or malforme
 |---|---|
 | `vonpay_checkout_health` | API health + latency |
 | `vonpay_checkout_list_test_cards` | Sandbox card numbers + their outcomes |
-| `vonpay_checkout_diagnose_error` | Take an error code, return structured `{ retryable, nextAction, llmHint, fix, docs, agentInstructions }` — pure data, no API call |
+| `vonpay_checkout_diagnose_error` | Take an error code, return structured `{ retryable, nextAction, llmHint, fix, docs, agentInstructions }` - pure data, no API call |
 
 ## Example agent prompts
 
@@ -136,7 +136,7 @@ Then refund half of it.
 Tell me the intent ID and status at each step.
 ```
 
-The agent chains four tool calls: `create_payment_intent` → poll status → `capture_payment_intent` → `create_refund`. Each step's result feeds the next. Run this on a sandbox key — on a live key each of those calls stops for a human's approval (see [Safety](#safety)).
+The agent chains four tool calls: `create_payment_intent` → poll status → `capture_payment_intent` → `create_refund`. Each step's result feeds the next. Run this on a sandbox key - on a live key each of those calls stops for a human's approval (see [Safety](#safety)).
 
 ### Self-diagnose an error
 ```
@@ -144,7 +144,7 @@ I just hit a `webhook_invalid_signature` error from my webhook handler.
 What does that mean and how do I fix it?
 ```
 
-The agent calls `vonpay_checkout_diagnose_error` with `code: "webhook_invalid_signature"` and returns the structured remediation — `llmHint` explains the cause, `nextAction` says `fix_input`, `agentInstructions` says "branch: change the request body / parameters before retrying."
+The agent calls `vonpay_checkout_diagnose_error` with `code: "webhook_invalid_signature"` and returns the structured remediation - `llmHint` explains the cause, `nextAction` says `fix_input`, `agentInstructions` says "branch: change the request body / parameters before retrying."
 
 ### Discover the API
 ```
@@ -152,23 +152,23 @@ Fetch https://checkout.vonpay.com/.well-known/vonpay.json
 and tell me which SDK packages are available.
 ```
 
-No MCP call needed — the agent does a plain HTTP fetch. The discovery endpoint returns the live SDK package names, versions, and docs URLs.
+No MCP call needed - the agent does a plain HTTP fetch. The discovery endpoint returns the live SDK package names, versions, and docs URLs.
 
 ## Model compatibility
 
-The tool surface is model-agnostic — any model that can call MCP tools through one of the clients above works. Confirmed with:
+The tool surface is model-agnostic - any model that can call MCP tools through one of the clients above works. Confirmed with:
 
 - **Anthropic Claude** (Sonnet, Opus, Haiku 4.x) via Claude Code, Cursor, Claude Desktop, Continue
 - **OpenAI GPT** (4o, 4.1, 5-series) via Cursor's OpenAI mode, Continue with OpenAI provider
 - **Google Gemini** via Continue with Gemini provider
 - **Open-source models** (Llama, Qwen, DeepSeek) via local runtimes like Ollama + Continue's OpenAI-compatible API
 
-The MCP server itself is model-agnostic — it speaks the protocol, not the model. Pick whichever model performs best for your task.
+The MCP server itself is model-agnostic - it speaks the protocol, not the model. Pick whichever model performs best for your task.
 
 ## Safety
 
 - **Test-mode strongly recommended.** Use `vp_sk_test_*` for agent development. Live keys (`vp_sk_live_*`) hit live money.
-- **Destructive operations are exposed.** `void`, `refund`, and `capture` change real state. On a live key they (and payment-intent creation, and saving a reusable card) refuse without `confirmLive: true` — see below. The MCP's `diagnose_error` tool always emits `agentInstructions: "do not retry"` for terminal states (declined, voided) — prevents accidental retry loops.
+- **Destructive operations are exposed.** `void`, `refund`, and `capture` change real state. On a live key they (and payment-intent creation, and saving a reusable card) refuse without `confirmLive: true` - see below. The MCP's `diagnose_error` tool always emits `agentInstructions: "do not retry"` for terminal states (declined, voided) - prevents accidental retry loops.
 - **Idempotency-aware.** Every create-style tool accepts an `idempotencyKey` parameter; pass any UUID-shaped string to make retries safe.
 - **No PAN handling.** Card data never passes through this MCP. Tokenization happens browser-side via [vora.js](https://docs.vonpay.com/mirror) or via SDK-provided `providerReference` for server-side flows.
 - **API key never echoed.** The MCP reads `VON_PAY_SECRET_KEY` and never includes it in tool responses.
@@ -177,7 +177,7 @@ The MCP server itself is model-agnostic — it speaks the protocol, not the mode
 
 With a live key (`vp_sk_live_*`), five tools refuse to run unless the call passes `confirmLive: true`: `create_payment_intent`, `capture_payment_intent`, `void_payment_intent`, `create_refund`, and `create_token` when it saves a reusable card (`setupForFutureUse` set). The refusal tells the agent to show its human exactly what the call will do, get explicit approval for **that** call, and only then re-invoke with `confirmLive: true`. Approval does not carry over from one call to the next.
 
-Sandbox keys (`vp_sk_test_*`) are never gated — every tool behaves exactly as before.
+Sandbox keys (`vp_sk_test_*`) are never gated - every tool behaves exactly as before.
 
 ⚠️ Know what this check is and is not. It runs in the MCP server process on your machine, not at Von Payments, and `confirmLive` is set by the calling model. It makes a well-behaved agent stop and ask; it is **not** a control against an agent that has been manipulated (for example by instructions hidden in content it read), because such an agent can set the flag itself. If an agent will act on untrusted input, keep it on a sandbox key or put your own approval step in front of these tools.
 
@@ -188,11 +188,11 @@ Sandbox keys (`vp_sk_test_*`) are never gated — every tool behaves exactly as 
 - **Traditional server-side integration:** see [`checkout-express`](../checkout-express), [`checkout-flask`](../checkout-flask), [`checkout-nextjs`](../checkout-nextjs), or [`checkout-paybylink-nextjs`](../checkout-paybylink-nextjs).
 - **Driving the payment-intent lifecycle from your server:** see [`payment-intents-node`](../payment-intents-node) or [`payment-intents-python`](../payment-intents-python).
 - **Reacting to async events:** see [`webhooks-node`](../webhooks-node) for signature verification and idempotent processing.
-- **Embedding card fields in your own checkout page:** in-page card collection (Vora Mirror) — see [`checkout-embedded`](../checkout-embedded) and the [Vora Mirror guide](https://docs.vonpay.com/mirror).
+- **Embedding card fields in your own checkout page:** in-page card collection (Vora Mirror) - see [`checkout-embedded`](../checkout-embedded) and the [Vora Mirror guide](https://docs.vonpay.com/mirror).
 
 ## Going live
 
-Swap `vp_sk_test_*` for `vp_sk_live_*` in your MCP config and restart the client. The tool list is the same, but the five money-moving tools now refuse unless a human approves each call and the agent passes `confirmLive: true` — see [Live keys](#live-keys-money-moving-calls-need-a-humans-go-ahead).
+Swap `vp_sk_test_*` for `vp_sk_live_*` in your MCP config and restart the client. The tool list is the same, but the five money-moving tools now refuse unless a human approves each call and the agent passes `confirmLive: true` - see [Live keys](#live-keys-money-moving-calls-need-a-humans-go-ahead).
 
 Live-key admin happens in your merchant dashboard, not via MCP. The MCP is intentionally scoped to the API; merchant configuration changes are human-only.
 
@@ -201,7 +201,7 @@ Live-key admin happens in your merchant dashboard, not via MCP. The MCP is inten
 - [MCP server reference](https://docs.vonpay.com/sdks/mcp)
 - [AI agents guide](https://docs.vonpay.com/agents)
 - [Error codes reference](https://docs.vonpay.com/reference/error-codes)
-- [llms.txt — single-file API summary](https://checkout.vonpay.com/llms.txt) — point any LLM at this URL for grounded answers
+- [llms.txt - single-file API summary](https://checkout.vonpay.com/llms.txt) - point any LLM at this URL for grounded answers
 - [API discovery](https://checkout.vonpay.com/.well-known/vonpay.json)
 - [Model Context Protocol spec](https://modelcontextprotocol.io)
 

@@ -41,9 +41,8 @@ import {
 // equivalent in production — webhook deliveries can hit multiple
 // instances and you must dedupe across them.
 //
-// We compose a dedup key from sessionId + event-type + timestamp, which
-// is unique per delivery for the typed event shape returned by
-// constructEvent.
+// The dedup key is the event `id` (`vp_evt_*`), which is unique per
+// outbound event — see the handler below.
 const seenEventKeys = new Map<string, number>();
 const SEEN_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
@@ -132,6 +131,11 @@ export async function POST(req: NextRequest) {
       err instanceof Error ? err.message : String(err),
     );
     return NextResponse.json({ error: "invalid_signature" }, { status: 400 });
+  }
+
+  // A "Send test event" delivery is signed and can carry a real order's ids: acknowledge it and do nothing else.
+  if (event.test_event === true) {
+    return NextResponse.json({ received: true });
   }
 
   // Idempotency dedupe — events can be retried by Von Payments; we should

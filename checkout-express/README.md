@@ -1,9 +1,9 @@
-# Von Payments Checkout — Express sample
+# Von Payments Checkout - Express sample
 
 Minimal end-to-end reference integration on Express 5: create a session, redirect the buyer to `checkout.vonpay.com`, confirm the outcome server-side on `/success`, and verify HMAC webhooks on `/webhooks`.
 
 - **Stack:** Express 5, TypeScript (run via `tsx`)
-- **Von Payments SDK:** `@vonpay/checkout-node` 2.x (`^2`)
+- **Von Payments SDK:** `@vonpay/checkout-node` 2.x - 2.7.0 or later (`^2.7.0`)
 - **What it demonstrates:** session creation with an idempotency key, server-side return confirmation, HMAC webhook verification with raw-body parsing
 
 ## 5-minute setup
@@ -12,7 +12,7 @@ Minimal end-to-end reference integration on Express 5: create a session, redirec
 
 Sign up at [app.vonpay.com](https://app.vonpay.com), complete OTP, then `/dashboard/developers` → **Create sandbox**. Copy the values from the banner (only shown once):
 
-- `vp_sk_test_...` — secret API key
+- `vp_sk_test_...` - secret API key
 
 Then register a webhook endpoint at `/dashboard/developers/webhooks` to get its signing secret (`whsec_...`, shown once).
 
@@ -43,17 +43,19 @@ ngrok http 3000
 ## How it works
 
 ```
-server.ts        — Express server: /, /checkout, /webhooks, /success, /health
+server.ts        - Express server: /, /checkout, /webhooks, /success, /health
 ```
 
-The `sessions.create()` call sends an idempotency key derived from the order id, so a retry that reuses the same order id returns the same session. This sample creates its order id per request, so in your code create the order first and reuse its id — otherwise a double-click or refresh still makes a second session; it returns `{ id, checkoutUrl, expiresAt }`. The server redirects the buyer to `checkoutUrl`. After payment, the buyer is redirected back to `/success` with a signed query string. ⚠️ This sample does **not** verify that signature, deliberately: returns are signed with a platform-wide secret no merchant holds, so a per-merchant `ss_*` can only ever fail the check. ``sessions.confirmReturn()`` instead re-reads the session from the API using your own secret key — an authenticated answer to “did this buyer pay”, which the signature never was.
+The `sessions.create()` call sends an idempotency key derived from the order id, so a retry that reuses the same order id returns the same session. This sample creates its order id per request, so in your code create the order first and reuse its id - otherwise a double-click or refresh still makes a second session; it returns `{ id, checkoutUrl, expiresAt }`. The server redirects the buyer to `checkoutUrl`. After payment, the buyer is redirected back to `/success` with a signed query string. ⚠️ This sample does **not** verify that signature, deliberately: returns are signed with a platform-wide secret no merchant holds, so a per-merchant `ss_*` can only ever fail the check. ``sessions.confirmReturn()`` instead re-reads the session from the API using your own secret key - an authenticated answer to “did this buyer pay”, which the signature never was.
 
-Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header — there is no separate timestamp header). `vonpay.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent` discriminated union. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) — not your API key.
+Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header - there is no separate timestamp header). `vonpay.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent` discriminated union. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) - not your API key.
+
+**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0, hence `^2.7.0`).
 
 ## Security notes
 
 - **Always use raw body for webhook verification.** This sample mounts `express.raw({ type: "application/json" })` only on `/webhooks` so the body is the exact bytes that were signed, not a parsed object.
-- **Pin the SDK.** `"latest"` drifts silently; this sample pins the major (`^2`) and commits a lockfile.
+- **Pin the SDK.** `"latest"` drifts silently; this sample pins the major with a 2.7.0 floor (`^2.7.0`) and commits a lockfile.
 - **Two different secrets.** The webhook signing secret (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) signs webhooks. The API key (`vp_sk_*`) authenticates API calls and is what confirms a return. A per-merchant session signing secret (`ss_*`) is not used: it cannot verify the return redirect.
 
 ## Related
@@ -61,5 +63,5 @@ Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<
 - [Quickstart](https://docs.vonpay.com/quickstart)
 - [Node SDK reference](https://docs.vonpay.com/sdks/node-sdk)
 - [Webhook verification guide](https://docs.vonpay.com/integration/webhook-verification)
-- `samples/checkout-nextjs` — same flow on Next.js App Router
-- `samples/checkout-flask` — Python equivalent
+- `samples/checkout-nextjs` - same flow on Next.js App Router
+- `samples/checkout-flask` - Python equivalent

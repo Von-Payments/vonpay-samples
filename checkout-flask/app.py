@@ -4,6 +4,7 @@ import os
 import time
 
 from flask import Flask, redirect, request, jsonify
+from flask.typing import ResponseReturnValue
 from markupsafe import escape
 from vonpay.checkout import VonPayCheckout, VonPayError
 
@@ -43,7 +44,9 @@ def create_checkout():
 
 
 @app.post("/webhooks")
-def webhooks():
+def webhooks() -> ResponseReturnValue:
+    # Annotated so a type checker reads this body: an unannotated function is
+    # skipped by default, and this is the handler where a typo costs money.
     body = request.get_data(as_text=True)
     # The signed timestamp lives inside the signature header (t=,v1=) — there
     # is no separate timestamp header.
@@ -58,6 +61,10 @@ def webhooks():
         # successfully. Every other sample returns 400 here, and the delivery
         # engine treats 4xx as a non-retryable bad request either way.
         return jsonify({"error": "invalid_signature"}), 400
+
+    # A "Send test event" delivery is signed and can carry a real order's ids: acknowledge it and do nothing else.
+    if event.test_event:
+        return jsonify({"received": True})
 
     # Branch on event type. `charge.succeeded` is the event that means the buyer
     # actually paid; do NOT fulfill orders on `charge.failed`. Session IDs

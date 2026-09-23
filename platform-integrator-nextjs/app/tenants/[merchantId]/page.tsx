@@ -1,7 +1,13 @@
+import { randomUUID } from "node:crypto";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getTenant } from "@/lib/tenants";
 import { CUSTOMERS } from "@/lib/customers";
+
+// Render on every request. Each charge form below carries an order id minted
+// at render time; a cached render would hand every visitor the SAME ids, and
+// their purchases would collapse into one checkout session.
+export const dynamic = "force-dynamic";
 
 interface Props {
   params: Promise<{ merchantId: string }>;
@@ -46,6 +52,11 @@ export default async function TenantPage({ params }: Props) {
             }}
           >
             <input type="hidden" name="tenantId" value={tenant.id} />
+            {/* One id per rendered order. A double-click or a retried POST of
+                this form resends the SAME id, so it dedupes to one session;
+                a separate purchase gets a separate render and a new id. In
+                production, create the order row first and use its id. */}
+            <input type="hidden" name="orderId" value={`ord_${randomUUID()}`} />
             <input type="hidden" name="customerId" value={c.id} />
             <input type="hidden" name="customerEmail" value={c.email} />
             <input
@@ -80,7 +91,8 @@ export default async function TenantPage({ params }: Props) {
         >
           <li>
             Form POSTs to <code>/api/charge</code> with{" "}
-            <code>tenantId={tenant.id}</code>.
+            <code>tenantId={tenant.id}</code> and an <code>orderId</code>{" "}
+            minted when this page rendered.
           </li>
           <li>
             Server resolves the tenant&apos;s <code>vp_sk</code> via{" "}
@@ -88,7 +100,8 @@ export default async function TenantPage({ params }: Props) {
           </li>
           <li>
             Server calls <code>vonpay.sessions.create()</code> with that key,
-            an <code>Idempotency-Key</code>, and a tenant-scoped{" "}
+            an <code>Idempotency-Key</code> of{" "}
+            <code>{"{tenantId}:{orderId}"}</code>, and a tenant-scoped{" "}
             <code>successUrl</code>.
           </li>
           <li>Server returns a 303 redirect to the Von Payments checkout URL.</li>

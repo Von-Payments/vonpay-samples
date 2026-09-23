@@ -1,30 +1,30 @@
-# Payment Intents — 3D Secure (3DS / SCA) handling
+# Payment Intents - 3D Secure (3DS / SCA) handling
 
-Server-side handling for a payment intent that returns **`requires_action`** — the issuer wants to challenge the buyer (3D Secure / Strong Customer Authentication). Single Express server that creates the intent, redirects the buyer to the bank's challenge page, and confirms the terminal outcome from the webhook.
+Server-side handling for a payment intent that returns **`requires_action`** - the issuer wants to challenge the buyer (3D Secure / Strong Customer Authentication). Single Express server that creates the intent, redirects the buyer to the bank's challenge page, and confirms the terminal outcome from the webhook.
 
 - **Stack:** Node 20+, TypeScript strict, ESM, Express 5
-- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x — **2.5.0 or later** (`^2.5.0`), the first release that types `returnUrl` on `paymentIntents.create`
+- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x - **2.7.0 or later** (`^2.7.0`): 2.5.0 is the first release that types `returnUrl` on `paymentIntents.create`, and 2.7.0 the first that types `test_event` on webhook events
 - **Best for:** server-driven (Payment Intents) integrations in regions where SCA applies (EU/UK/EEA), or any flow where the issuer may step up to 3DS
 
 ## The 3DS server-side model in one paragraph
 
-You don't decide whether to challenge — the issuer does. When it wants to, `POST /v1/payment_intents` returns `status: "requires_action"` and a `next_action` of type `redirect_to_url`. The **only** correct move is a **top-level browser redirect** to that URL (banks block their challenge inside an iframe). After the buyer authenticates, the bank sends them back to your `return_url`, but that return is a **UX signal only** — the authoritative terminal state arrives on the `payment_intent.succeeded` / `payment_intent.failed` webhook. There is no client SDK "confirm" call in this server-driven path; the redirect is the confirm step.
+You don't decide whether to challenge - the issuer does. When it wants to, `POST /v1/payment_intents` returns `status: "requires_action"` and a `next_action` of type `redirect_to_url`. The **only** correct move is a **top-level browser redirect** to that URL (banks block their challenge inside an iframe). After the buyer authenticates, the bank sends them back to your `return_url`, but that return is a **UX signal only** - the authoritative terminal state arrives on the `payment_intent.succeeded` / `payment_intent.failed` webhook. There is no client SDK "confirm" call in this server-driven path; the redirect is the confirm step.
 
-> **Hosted Checkout already does all of this for you.** If a hosted redirect is acceptable, use [Sessions](https://docs.vonpay.com/integration/create-session) — Von Payments renders the card form, runs 3DS, and redirects back, and you stay out of PCI scope. Payment Intents are for the cases Sessions can't cover (delayed capture, fraud-check-before-capture, platform integrators driving the state machine themselves).
+> **Hosted Checkout already does all of this for you.** If a hosted redirect is acceptable, use [Sessions](https://docs.vonpay.com/integration/create-session) - Von Payments renders the card form, runs 3DS, and redirects back, and you stay out of PCI scope. Payment Intents are for the cases Sessions can't cover (delayed capture, fraud-check-before-capture, platform integrators driving the state machine themselves).
 
 ## What it demonstrates
 
 | Route | What happens |
 |---|---|
 | `POST /charge` | Create a manual-capture intent with a `vp_pmt_*` token. Branch on `status`: `requires_action` → redirect to the 3DS URL · `authorized` → capture immediately · `failed` → surface the decline |
-| `GET /3ds/return` | Where the issuer returns the buyer after the challenge. UX only — does **not** fulfill |
+| `GET /3ds/return` | Where the issuer returns the buyer after the challenge. UX only - does **not** fulfill |
 | `POST /webhooks` | Verify `x-vonpay-signature`, then act on `payment_intent.succeeded` / `payment_intent.failed` to confirm the post-challenge terminal state |
 
 The intent is created with `captureMethod: "manual"` so a 3DS success lands on `authorized` (funds held, not captured) and the server captures explicitly. Switch to `captureMethod: "automatic"` and the same flow collapses straight to `succeeded`.
 
 ## Reading the challenge URL
 
-Everything this sample sends and reads is on the SDK's typed surface — `paymentMethod` and `returnUrl` on `CreatePaymentIntentParams`, and `nextAction` typed as `PaymentIntentNextAction | null`. Two details are worth knowing:
+Everything this sample sends and reads is on the SDK's typed surface - `paymentMethod` and `returnUrl` on `CreatePaymentIntentParams`, and `nextAction` typed as `PaymentIntentNextAction | null`. Two details are worth knowing:
 
 1. **The SDK camelCases response keys.** The API wire shape is `{ type: "redirect_to_url", redirect_to_url: { url } }`, but the SDK returns it as `nextAction.redirectToUrl.url`. Reading `nextAction.redirect_to_url.url` gives `undefined`. (The `type` is a string *value*, not a key, so it stays `"redirect_to_url"`.) The sample branches on `type` in `extractRedirectUrl`, so a future `next_action` type can't silently break the redirect.
 2. **`nextAction` is only on the response that creates the payment.** It is not persisted, so a later read or an idempotent replay will not carry it. Redirect from the create response.
@@ -33,13 +33,13 @@ Everything this sample sends and reads is on the SDK's typed surface — `paymen
 
 ### 1. Get a sandbox key + webhook secret
 
-[vonpay.com/developers](https://vonpay.com/developers) → **Activate Vora Sandbox**. You'll get a `vp_sk_test_…` secret key. Create a webhook endpoint pointing at your public `/webhooks` URL — you'll be shown a `whsec_…` signing secret once.
+[vonpay.com/developers](https://vonpay.com/developers) → **Activate Vora Sandbox**. You'll get a `vp_sk_test_…` secret key. Create a webhook endpoint pointing at your public `/webhooks` URL - you'll be shown a `whsec_…` signing secret once.
 
 ### 2. Configure + run
 
 ```bash
 cp .env.example .env
-# edit .env — paste in vp_sk_test_... and whsec_...
+# edit .env - paste in vp_sk_test_... and whsec_...
 
 npm install
 npm run dev
@@ -53,7 +53,7 @@ curl -i -X POST http://localhost:3000/charge \
   -d '{ "paymentMethod": "vp_pmt_test_3ds_success_sample", "amount": 4999 }'
 ```
 
-With a 3DS token, `/charge` responds `303` with a `Location` header pointing at the sandbox challenge URL — that's the redirect your buyer's browser follows.
+With a 3DS token, `/charge` responds `303` with a `Location` header pointing at the sandbox challenge URL - that's the redirect your buyer's browser follows.
 
 ## Triggering 3DS in the sandbox
 
@@ -63,21 +63,23 @@ The sandbox encodes the intended outcome in the token's middle segment (see the 
 |---|---|
 | `vp_pmt_test_3ds_success_<anything>` | `requires_action` → (after challenge) `payment_intent.succeeded` |
 | `vp_pmt_test_3ds_fail_<anything>` | `requires_action` → (after challenge) `payment_intent.failed` (`decline_code: fraud_suspected`) |
-| `vp_pmt_test_success_<anything>` | `authorized` immediately — no challenge (auto-capture path → `succeeded`) |
+| `vp_pmt_test_success_<anything>` | `authorized` immediately - no challenge (auto-capture path → `succeeded`) |
 | `vp_pmt_test_decline_<reason>_<anything>` | `failed` before any challenge |
 
-`/charge` defaults to `vp_pmt_test_3ds_success_sample` when you don't pass a token, so the happy-path 3DS branch runs out of the box. `vp_pmt_test_*` tokens are sandbox-only — they're rejected with `payment_method_inactive` on live keys.
+`/charge` defaults to `vp_pmt_test_3ds_success_sample` when you don't pass a token, so the happy-path 3DS branch runs out of the box. `vp_pmt_test_*` tokens are sandbox-only - they're rejected with `payment_method_inactive` on live keys.
 
 The card numbers behind these tokens (e.g. `4000 0027 6000 3184` for 3DS success) come from VORA Mirror tokenization on your front end in a real integration; this server-only sample uses the synthetic tokens directly so it runs without a browser card form.
 
 ## Why the webhook is the source of truth
 
-The buyer's browser returning to `/3ds/return` tells you the challenge *finished*, not that it *passed* — the browser can be closed, lose connectivity, or be tampered with mid-flow. The terminal state is confirmed server-side:
+The buyer's browser returning to `/3ds/return` tells you the challenge *finished*, not that it *passed* - the browser can be closed, lose connectivity, or be tampered with mid-flow. The terminal state is confirmed server-side:
 
 - `payment_intent.succeeded` → 3DS passed and funds settled. **This** is the signal to fulfill.
 - `payment_intent.failed` → challenge rejected or charge declined. Do **not** fulfill.
 
-`vonpay.webhooks.constructEvent` verifies the signature and returns the typed `WebhookEvent` union, which includes the `payment_intent.*` events — discriminator `type`, body nested under `data`, decline reason at `data.failure_reason` (see the [webhook events reference](https://docs.vonpay.com/integration/webhook-events)). Switching on `event.type` narrows `event.data`, so there is no second parse and no widened type. Dedupe redeliveries on the event `id` (`vp_evt_*`) with a durable store.
+`vonpay.webhooks.constructEvent` verifies the signature and returns the typed `WebhookEvent` union, which includes the `payment_intent.*` events - discriminator `type`, body nested under `data`, decline reason at `data.failure_reason` (see the [webhook events reference](https://docs.vonpay.com/integration/webhook-events)). Switching on `event.type` narrows `event.data`, so there is no second parse and no widened type. Dedupe redeliveries on the event `id` (`vp_evt_*`) with a durable store.
+
+**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0, hence `^2.7.0`).
 
 ### Testing the webhook locally
 
@@ -89,14 +91,14 @@ Expose your local server (e.g. `cloudflared tunnel --url http://localhost:3000` 
 |---|---|
 | `npm run dev` | Run `server.ts` via `tsx` (no build step) |
 | `npm start` | Same server through `ts-node/esm` (CI-friendlier) |
-| `npm run typecheck` | `tsc --noEmit` against `server.ts` — runs in CI before publish |
+| `npm run typecheck` | `tsc --noEmit` against `server.ts` - runs in CI before publish |
 
 ## Configuration
 
 | Env var | Required | Default |
 |---|---|---|
-| `VON_PAY_SECRET_KEY` | yes | — |
-| `VON_PAY_WEBHOOK_SECRET` | yes | — |
+| `VON_PAY_SECRET_KEY` | yes | - |
+| `VON_PAY_WEBHOOK_SECRET` | yes | - |
 | `VON_PAY_BASE_URL` | no | `https://checkout.vonpay.com` |
 | `VON_PAY_RETURN_URL` | no | `http://localhost:{PORT}/3ds/return` |
 | `PORT` | no | `3000` |
@@ -106,17 +108,17 @@ The default base URL is production (`checkout.vonpay.com`). A `vp_sk_test_` key 
 ## Going to production
 
 - **Never trust the return page.** Fulfill from the `payment_intent.succeeded` webhook, not from `/3ds/return`. The return is a UX hint only.
-- **Redirect at the top level.** Always do a full-page navigation (or a new top-level tab) to the challenge URL — banks frame-bust their 3DS pages, so an iframe redirect fails.
+- **Redirect at the top level.** Always do a full-page navigation (or a new top-level tab) to the challenge URL - banks frame-bust their 3DS pages, so an iframe redirect fails.
 - **Verify webhooks with the `whsec_*` secret**, not your API key, over the **raw** request body. Mount `express.raw()` on the webhook route only.
 - **Make the idempotency keys deterministic.** This sample derives them from a per-request order id (`{order}:authorize`, `{order}:capture`); in production tie them to your real upstream order id so retries collapse.
-- **Make `/webhooks` idempotent.** Redeliveries carry the same logical event — dedupe on the event id (durable store, not in-memory) so a retry doesn't double-fulfill.
+- **Make `/webhooks` idempotent.** Redeliveries carry the same logical event - dedupe on the event id (durable store, not in-memory) so a retry doesn't double-fulfill.
 
 ## Reference docs
 
-- [Payment intents — authentication challenges (3DS)](https://docs.vonpay.com/integration/payment-intents#authentication-challenges-3ds)
-- [Webhooks](https://docs.vonpay.com/integration/webhooks) — signature verification + event types
+- [Payment intents - authentication challenges (3DS)](https://docs.vonpay.com/integration/payment-intents#authentication-challenges-3ds)
+- [Webhooks](https://docs.vonpay.com/integration/webhooks) - signature verification + event types
 - [Test cards + sandbox triggers](https://docs.vonpay.com/reference/test-cards)
 
 ## Tested against
 
-`@vonpay/checkout-node` 2.x (2.5.0 or later) — typecheck with `npm run typecheck`. End-to-end 3DS smoke (charge → redirect → challenge → `payment_intent.succeeded` webhook) requires a `vp_sk_test_…` key plus a publicly reachable `/webhooks` URL.
+`@vonpay/checkout-node` 2.x (2.7.0 or later) - typecheck with `npm run typecheck`. End-to-end 3DS smoke (charge → redirect → challenge → `payment_intent.succeeded` webhook) requires a `vp_sk_test_…` key plus a publicly reachable `/webhooks` URL.

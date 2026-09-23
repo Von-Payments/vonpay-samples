@@ -65,6 +65,12 @@ app.post("/webhooks", (req, res) => {
     return;
   }
 
+  // A "Send test event" delivery is signed and can carry a real order's ids: acknowledge it and do nothing else.
+  if (event.test_event === true) {
+    res.json({ received: true });
+    return;
+  }
+
   // Branch on event type. `charge.succeeded` is the event that means the buyer
   // actually paid; do NOT fulfill orders on `charge.failed`. Session IDs
   // are deep-link tokens — keep them out of general application logs and only

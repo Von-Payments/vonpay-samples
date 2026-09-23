@@ -1,10 +1,10 @@
-# Von Payments Checkout — platform integrator sample (Next.js)
+# Von Payments Checkout - platform integrator sample (Next.js)
 
 Multi-tenant reference integration for platforms (CRMs, subscription engines, ISVs) that resell Von Payments to their own merchants. Demonstrates the per-tenant credential pattern: each merchant onboarded to the platform has their own Von Payments API key and webhook signing secret stored on the platform side; the platform looks up the right credentials at charge time and at webhook time.
 
 - **Stack:** Next.js 15 / React 19 / TypeScript strict
-- **Von Payments SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x (`^2`)
-- **Best for:** subscription-billing CRMs, headless commerce platforms, ISV cart products, marketplace operators — anywhere your product has many "merchants" and each wants to plug Von Payments in as their gateway
+- **Von Payments SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x - 2.7.0 or later (`^2.7.0`)
+- **Best for:** subscription-billing CRMs, headless commerce platforms, ISV cart products, marketplace operators - anywhere your product has many "merchants" and each wants to plug Von Payments in as their gateway
 
 ## What it demonstrates
 
@@ -16,7 +16,7 @@ The patterns that aren't obvious from the single-merchant samples:
 | Tenant-scoped session creation with `Idempotency-Key` | `app/api/charge/route.ts` |
 | Tenant-scoped `Von-Pay-Version` header | `app/api/charge/route.ts` (via SDK config) |
 | Tenant-scoped confirmation via each tenant's own API key | `app/tenants/[merchantId]/confirm/page.tsx` |
-| **Multi-tenant webhook routing** — single endpoint, route by `merchantId` | `app/api/webhooks/route.ts` |
+| **Multi-tenant webhook routing** - single endpoint, route by `merchantId` | `app/api/webhooks/route.ts` |
 | Per-tenant webhook signature verification with the tenant's `whsec_*` | `app/api/webhooks/route.ts` |
 | In-memory event idempotency dedup | `app/api/webhooks/route.ts` (replace with Redis in production) |
 | CRM-style platform UI: tenants → customers → charge | `app/page.tsx` + `app/tenants/[merchantId]/page.tsx` |
@@ -25,7 +25,7 @@ The patterns that aren't obvious from the single-merchant samples:
 
 There is no special "platform account" credential format in Von Payments today. The platform model is:
 
-1. **Each of your platform's merchants signs up at app.vonpay.com** (or you walk them through it during onboarding) and gets their own `vp_sk_test_*` API key. (The sandbox banner also shows an `ss_test_*` session signing secret — you do not need to store it. The return redirect is signed with a platform-wide secret no merchant holds, so a per-tenant `ss_*` cannot verify it.)
+1. **Each of your platform's merchants signs up at app.vonpay.com** (or you walk them through it during onboarding) and gets their own `vp_sk_test_*` API key. (The sandbox banner also shows an `ss_test_*` session signing secret - you do not need to store it. The return redirect is signed with a platform-wide secret no merchant holds, so a per-tenant `ss_*` cannot verify it.)
 2. **Each merchant registers a webhook endpoint** in their dashboard and gets a per-endpoint `whsec_*` signing secret (shown once at create time).
 3. **Your platform stores both** in your DB, keyed by your internal merchant/tenant ID. Encrypt at rest.
 4. **At charge time:** look up the tenant's `vp_sk`, instantiate the SDK with that key, create the session.
@@ -37,7 +37,7 @@ This sample simulates 3 tenants via env vars (`TENANT_A_VP_SK` / `TENANT_A_WHSEC
 
 ### 1. Get sandbox keys for 3 tenants
 
-Sign up at [app.vonpay.com](https://app.vonpay.com) **3 times** with 3 different work emails (e.g. `you+tenantA@yourdomain.com` — Gmail / Office365 plus-addressing works fine). Each signup goes through OTP, then **Activate Vora Sandbox** at `/dashboard/developers`. You'll get a `vp_sk_test_*` per tenant. Register a webhook endpoint per tenant at `/dashboard/developers/webhooks` to get each tenant's `whsec_*`.
+Sign up at [app.vonpay.com](https://app.vonpay.com) **3 times** with 3 different work emails (e.g. `you+tenantA@yourdomain.com` - Gmail / Office365 plus-addressing works fine). Each signup goes through OTP, then **Activate Vora Sandbox** at `/dashboard/developers`. You'll get a `vp_sk_test_*` per tenant. Register a webhook endpoint per tenant at `/dashboard/developers/webhooks` to get each tenant's `whsec_*`.
 
 > Why three? To prove the multi-tenant routing. One signup is enough to *run* the sample, but the 3-tenant story is the whole point.
 
@@ -45,7 +45,7 @@ Sign up at [app.vonpay.com](https://app.vonpay.com) **3 times** with 3 different
 
 ```bash
 cp .env.example .env.local
-# Edit .env.local — paste 3 pairs of TENANT_*_VP_SK + TENANT_*_WHSEC
+# Edit .env.local - paste 3 pairs of TENANT_*_VP_SK + TENANT_*_WHSEC
 
 npm install
 npm run dev
@@ -58,11 +58,11 @@ Open `http://localhost:3000`:
 3. The browser hits `/api/charge`, which looks up Acme's keys and creates a session
 4. You're redirected to the Von Payments hosted checkout
 5. Complete with a [test card](https://docs.vonpay.com/reference/test-cards) (e.g. `4242 4242 4242 4242`)
-6. Return to `/tenants/tenant_a/confirm` — the page re-reads the session from the API using **Acme's** own secret key, not the other tenants'. ⚠️ It does NOT verify the return signature: that signature uses a platform-wide secret no tenant holds, so a per-tenant check could only ever fail. The per-tenant isolation here comes from the API key, which is the stronger guarantee
+6. Return to `/tenants/tenant_a/confirm` - the page re-reads the session from the API using **Acme's** own secret key, not the other tenants'. ⚠️ It does NOT verify the return signature: that signature uses a platform-wide secret no tenant holds, so a per-tenant check could only ever fail. The per-tenant isolation here comes from the API key, which is the stronger guarantee
 
 ### 3. Test webhooks (optional)
 
-Expose port 3000 via [`ngrok`](https://ngrok.com) and register the public URL in **each** tenant's dashboard webhook configuration. The shared `/api/webhooks` endpoint handles events for all 3 tenants — verify by completing checkouts on different tenants and watching the per-tenant log lines.
+Expose port 3000 via [`ngrok`](https://ngrok.com) and register the public URL in **each** tenant's dashboard webhook configuration. The shared `/api/webhooks` endpoint handles events for all 3 tenants - verify by completing checkouts on different tenants and watching the per-tenant log lines.
 
 ## Critical patterns
 
@@ -84,15 +84,25 @@ export function getTenantCredentials(tenantId: string): TenantCredentials {
 
 The platform owns the mapping from your internal `tenantId` → Von Payments credentials. Vora doesn't know your tenant model and doesn't need to.
 
-### Idempotency-Key per logical charge attempt
+### Idempotency-Key per order
 
 ```typescript
-// app/api/charge/route.ts
-const idempotencyKey = `${tenantId}:${customerId}:${amountCents}:${minuteBucket}`;
+// app/tenants/[merchantId]/page.tsx - one id per rendered charge form
+<input type="hidden" name="orderId" value={`ord_${randomUUID()}`} />
+
+// app/api/charge/route.ts - refuse anything that is not that shape, then key on it
+if (!ORDER_ID_PATTERN.test(orderId)) {
+  return NextResponse.json({ error: "invalid_order_id" }, { status: 400 });
+}
+const idempotencyKey = `${tenantId}:${orderId}`;
 const session = await vonpay.sessions.create(params, { idempotencyKey });
 ```
 
-Browser refreshes, network blips, and middleware retries can cause the same charge POST to land twice. The Idempotency-Key turns the second call into a no-op (returns the same session). **Send one on every connector POST.** The SDK forwards it as the `Idempotency-Key` header. Keep it stable for the charge attempt — a random UUID per call makes every retry a new session. Your own charge or order id is the best key; the customer + amount + minute bucket above stands in for one.
+A double-click, a network blip or a middleware retry can land the same charge POST twice. Both carry the same `orderId`, so the server returns the one session it already created instead of making a second. **Send a key on every connector POST.** The SDK forwards it as the `Idempotency-Key` header.
+
+Key it on the order, not on what the order looks like: two genuine purchases by the same customer, for the same amount, in the same minute are still two orders with two ids, and never merge into one session. Do not mint the id in the charge route either - a fresh id per request makes every retry a new session.
+
+This sample has no order table, so the tenant page mints the id when it renders (the page is rendered per request, so each visit gets fresh ids). In production, create the order row first and use its id.
 
 ### Multi-tenant webhook routing + per-tenant verification
 
@@ -107,35 +117,37 @@ const event = vonpay.webhooks.constructEvent(rawBody, signature, webhookSecret);
 // 5. ...now we trust the data. Update DB, fire downstream effects.
 ```
 
-The signature is verified using the **tenant's** per-endpoint `whsec_*` secret (not the API key, not a platform-wide secret), so we need to know who the tenant is *before* verification. The 2-step "peek then verify" pattern is safe because JSON-parsing a string has no side effects — we only act on the data after step 4 succeeds.
+The signature is verified using the **tenant's** per-endpoint `whsec_*` secret (not the API key, not a platform-wide secret), so we need to know who the tenant is *before* verification. The 2-step "peek then verify" pattern is safe because JSON-parsing a string has no side effects - we only act on the data after step 4 succeeds.
 
-`constructEvent` takes **three** arguments — `(rawBody, signatureHeader, whsec)`. The signed timestamp lives inside the `x-vonpay-signature` header (`t=<unix>,v1=<hex>`); there is no separate timestamp header.
+`constructEvent` takes **three** arguments - `(rawBody, signatureHeader, whsec)`. The signed timestamp lives inside the `x-vonpay-signature` header (`t=<unix>,v1=<hex>`); there is no separate timestamp header.
+
+**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0, hence `^2.7.0`).
 
 ### Idempotent event processing
 
 ```typescript
-const eventKey = `${event.sessionId}:${event.type}:${event.timestamp}`;
-if (!dedupe(eventKey)) {
+const eventKey = event.id; // vp_evt_* - unique per outbound event
+if (alreadyCompleted(eventKey)) {
   return NextResponse.json({ received: true, deduped: true });
 }
 ```
 
-Webhook deliveries are retried on failure. The receiver must dedupe. The sample composes a key from `sessionId + event-type + timestamp` and tracks it in an in-memory Map; production should use Redis or a persistent store so dedup works across instances.
+Webhook deliveries are retried on failure. The receiver must dedupe. The sample keys on the event `id` alone and tracks it in an in-memory Map; production should use a persistent store so dedup works across instances. Do not compose a key from the payload: one money movement can emit more than one event, and a payload-derived key can collapse two distinct events into one.
 
 ## Going to production
 
-- **DB-backed credential storage** — replace the env-var lookup with a real query, encrypted columns, decrypt at request time. Never log raw `vp_sk_*` or `whsec_*` values.
-- **Tenant offboarding** — when you offboard a merchant, mark their tenant row inactive. The webhook handler should 200-and-ignore events for offboarded tenants (don't 401, that signals a bug to Von Payments).
-- **Webhook idempotency** — replace the in-memory Map with Redis or a short-TTL DB table. Across multiple instances or auto-scaling, in-memory dedup misses cross-instance retries.
-- **Per-tenant audit log** — every charge call + webhook event should write to a per-tenant audit log. Helps diagnose merchant disputes ("we never charged that customer") and is usually required for compliance.
-- **Switch from `vp_sk_test_*` to `vp_sk_live_*`** per tenant after each merchant clears KYC + contract — see [Going Live](https://docs.vonpay.com/guides/going-live). Rotate the live `whsec_*` on a schedule per [Webhook Signing Secrets](https://docs.vonpay.com/integration/webhook-secrets).
+- **DB-backed credential storage** - replace the env-var lookup with a real query, encrypted columns, decrypt at request time. Never log raw `vp_sk_*` or `whsec_*` values.
+- **Tenant offboarding** - when you offboard a merchant, mark their tenant row inactive. The webhook handler should 200-and-ignore events for offboarded tenants (don't 401, that signals a bug to Von Payments).
+- **Webhook idempotency** - replace the in-memory Map with Redis or a short-TTL DB table. Across multiple instances or auto-scaling, in-memory dedup misses cross-instance retries.
+- **Per-tenant audit log** - every charge call + webhook event should write to a per-tenant audit log. Helps diagnose merchant disputes ("we never charged that customer") and is usually required for compliance.
+- **Switch from `vp_sk_test_*` to `vp_sk_live_*`** per tenant after each merchant clears KYC + contract - see [Going Live](https://docs.vonpay.com/guides/going-live). Rotate the live `whsec_*` on a schedule per [Webhook Signing Secrets](https://docs.vonpay.com/integration/webhook-secrets).
 
 ## What this sample doesn't cover
 
-- **Per-tenant rate limiting** — your platform should rate-limit charge POSTs per tenant to prevent abuse; not shown here.
-- **Outbound webhooks to your merchants** — your platform may want to forward `charge.succeeded` events to the merchant's own webhook URL (their internal CRM, fulfillment system). Not in scope of this sample. (Not `session.succeeded`: the server emits `session.*` internally, but those keys are not in the merchant subscription catalog, so an endpoint subscribed to one receives nothing, forever.)
-- **Captures, voids, and refunds** — the SDK exposes `paymentIntents.capture`, `paymentIntents.void`, and `refunds.create` natively. A platform would call these with the tenant's `vp_sk`, the same way `/api/charge` does for sessions.
+- **Per-tenant rate limiting** - your platform should rate-limit charge POSTs per tenant to prevent abuse; not shown here.
+- **Outbound webhooks to your merchants** - your platform may want to forward `charge.succeeded` events to the merchant's own webhook URL (their internal CRM, fulfillment system). Not in scope of this sample. (Not `session.succeeded`: the server emits `session.*` internally, but those keys are not in the merchant subscription catalog, so an endpoint subscribed to one receives nothing, forever.)
+- **Captures, voids, and refunds** - the SDK exposes `paymentIntents.capture`, `paymentIntents.void`, and `refunds.create` natively. A platform would call these with the tenant's `vp_sk`, the same way `/api/charge` does for sessions.
 
 ## Tested against
 
-`@vonpay/checkout-node` 2.x — typecheck with `npm run typecheck`.
+`@vonpay/checkout-node` 2.x - typecheck with `npm run typecheck`.
