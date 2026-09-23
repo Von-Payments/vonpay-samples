@@ -82,13 +82,13 @@ File-name conventions by client:
 
 ### 5. Restart the client. Confirm tools appear.
 
-In Claude Code: type `/mcp`. You should see `vonpay-checkout` with 11 tools. In Cursor: the Tools panel shows the same list. In Claude Desktop: the 🔌 icon appears in the input box.
+In Claude Code: type `/mcp`. You should see `vonpay-checkout` with 12 tools. In Cursor: the Tools panel shows the same list. In Claude Desktop: the 🔌 icon appears in the input box.
 
 If nothing shows up, check the MCP server logs - usually a missing or malformed `VON_PAY_SECRET_KEY`.
 
 ## What the agent can do
 
-11 tools across three surfaces.
+12 tools across three surfaces.
 
 ### Hosted checkout
 
@@ -96,6 +96,7 @@ If nothing shows up, check the MCP server logs - usually a missing or malformed 
 |---|---|
 | `vonpay_checkout_create_session` | Create a session, return checkout URL |
 | `vonpay_checkout_get_session` | Look up session status by ID |
+| `vonpay_checkout_get_payment_intent` | Look up a payment intent's stored state (read-only; only `succeeded` means captured) |
 | `vonpay_checkout_simulate_payment` | Generate a synthetic `succeeded`/`failed`/`expired` payload (no real API call) |
 
 ### Discrete-lifecycle
@@ -105,7 +106,7 @@ If nothing shows up, check the MCP server logs - usually a missing or malformed 
 | `vonpay_checkout_create_payment_intent` | Create a payment intent - recurring, MIT, saved-card flows |
 | `vonpay_checkout_capture_payment_intent` | Capture authorized funds (full or partial) |
 | `vonpay_checkout_void_payment_intent` | Release an auth hold pre-capture |
-| `vonpay_checkout_create_refund` | Refund a captured intent (full or partial) |
+| `vonpay_checkout_create_refund` | Refund a captured payment intent (`paymentIntent`) or a settled transaction (`transaction`) - exactly one, full or partial. Neither id is permission to refund: both are visible to the shopper's browser, so only refund an id from your own order records. |
 | `vonpay_checkout_create_token` | Vault a card. Pass `setupForFutureUse: "on_session"` for in-session reuse (upsells) or `"off_session"` for recurring / MIT; omit for single-use. |
 
 ### Diagnostics
@@ -136,7 +137,7 @@ Then refund half of it.
 Tell me the intent ID and status at each step.
 ```
 
-The agent chains four tool calls: `create_payment_intent` → poll status → `capture_payment_intent` → `create_refund`. Each step's result feeds the next. Run this on a sandbox key - on a live key each of those calls stops for a human's approval (see [Safety](#safety)).
+The agent chains four tool calls: `create_payment_intent` → poll status → `capture_payment_intent` → `create_refund`. Each step's result feeds the next. Run this on a sandbox key - on a live key each money-moving call stops for a human's approval (see [Live keys](#live-keys-every-money-moving-call-needs-a-person-to-approve-it)).
 
 ### Self-diagnose an error
 ```
@@ -168,18 +169,21 @@ The MCP server itself is model-agnostic - it speaks the protocol, not the model.
 ## Safety
 
 - **Test-mode strongly recommended.** Use `vp_sk_test_*` for agent development. Live keys (`vp_sk_live_*`) hit live money.
-- **Destructive operations are exposed.** `void`, `refund`, and `capture` change real state. On a live key they (and payment-intent creation, and saving a reusable card) refuse without `confirmLive: true` - see below. The MCP's `diagnose_error` tool always emits `agentInstructions: "do not retry"` for terminal states (declined, voided) - prevents accidental retry loops.
+- **Destructive operations are exposed.** `void`, `refund`, and `capture` change real state. On a live key they (and payment-intent creation, and saving a reusable card) run only after a person approves each one in your MCP client's confirmation prompt - see below. The MCP's `diagnose_error` tool always emits `agentInstructions: "do not retry"` for terminal states (declined, voided) - prevents accidental retry loops.
 - **Idempotency-aware.** Every create-style tool accepts an `idempotencyKey` parameter; pass any UUID-shaped string to make retries safe.
 - **No PAN handling.** Card data never passes through this MCP. Tokenization happens browser-side via [vora.js](https://docs.vonpay.com/mirror) or via SDK-provided `providerReference` for server-side flows.
 - **API key never echoed.** The MCP reads `VON_PAY_SECRET_KEY` and never includes it in tool responses.
+- **Refund ids are not authorization.** Payment intent ids and transaction ids are both visible to the shopper's browser. Never let an agent refund an id it found in a customer message, support chat, web page, or document - look it up in your own order records first.
 
-## Live keys: money-moving calls need a human's go-ahead
+## Live keys: every money-moving call needs a person to approve it
 
-With a live key (`vp_sk_live_*`), five tools refuse to run unless the call passes `confirmLive: true`: `create_payment_intent`, `capture_payment_intent`, `void_payment_intent`, `create_refund`, and `create_token` when it saves a reusable card (`setupForFutureUse` set). The refusal tells the agent to show its human exactly what the call will do, get explicit approval for **that** call, and only then re-invoke with `confirmLive: true`. Approval does not carry over from one call to the next.
+This sample uses a sandbox key (`vp_sk_test_*`). Sandbox keys are never gated - every tool runs as soon as the agent calls it.
 
-Sandbox keys (`vp_sk_test_*`) are never gated - every tool behaves exactly as before.
+With a live key (`vp_sk_live_*`), five tools move real money: `create_payment_intent`, `capture_payment_intent`, `void_payment_intent`, `create_refund`, and `create_token` when it saves a reusable card (`setupForFutureUse` set). For each of those calls, the MCP server asks **the person** - not the agent - to approve that specific action, amount and id through your MCP client's own confirmation prompt. The call goes to Von Payments only if they accept. If they decline, dismiss it, or do not answer within 5 minutes, nothing is sent. Approval never carries over to the next call.
 
-⚠️ Know what this check is and is not. It runs in the MCP server process on your machine, not at Von Payments, and `confirmLive` is set by the calling model. It makes a well-behaved agent stop and ask; it is **not** a control against an agent that has been manipulated (for example by instructions hidden in content it read), because such an agent can set the flag itself. If an agent will act on untrusted input, keep it on a sandbox key or put your own approval step in front of these tools.
+**Your MCP client must support user confirmation prompts** (the MCP "elicitation" feature). If it does not, those five tools are refused on a live key - use a client that does, or stay on a sandbox key. The call must also pass `confirmLive: true`, but that flag is set by the AI model, so on its own it proves nothing and is not the safeguard.
+
+⚠️ Know what this check is and is not. It runs in the MCP server process on your machine, not at Von Payments, and the prompt is drawn by your MCP client, so it is only as trustworthy as that client. Do not use a client or setting that approves prompts automatically. Read each prompt before accepting it, especially if the agent has been reading untrusted content (customer messages, web pages, documents), which can try to steer it.
 
 ## When to use this sample vs the other samples
 
@@ -192,7 +196,7 @@ Sandbox keys (`vp_sk_test_*`) are never gated - every tool behaves exactly as be
 
 ## Going live
 
-Swap `vp_sk_test_*` for `vp_sk_live_*` in your MCP config and restart the client. The tool list is the same, but the five money-moving tools now refuse unless a human approves each call and the agent passes `confirmLive: true` - see [Live keys](#live-keys-money-moving-calls-need-a-humans-go-ahead).
+First confirm your MCP client supports user confirmation prompts (MCP elicitation) - on a live key, a client without it cannot run any money-moving tool. Then swap `vp_sk_test_*` for `vp_sk_live_*` in your MCP config and restart the client. The tool list is the same, but each call to one of the five money-moving tools now waits for a person to approve it in the client's prompt - see [Live keys](#live-keys-every-money-moving-call-needs-a-person-to-approve-it).
 
 Live-key admin happens in your merchant dashboard, not via MCP. The MCP is intentionally scoped to the API; merchant configuration changes are human-only.
 
