@@ -22,6 +22,8 @@ Sign in at [app.vonpay.com](https://app.vonpay.com/?next=/dashboard/developers) 
 
 No merchant application required - sandbox is free.
 
+Test payments run on a sandbox account backed by a payment provider's test environment. A test key on a live account, or on a sandbox account with no payment provider, is refused with `422 sandbox_account_required`.
+
 ### 2. Install the MCP server
 
 ```bash
@@ -107,14 +109,14 @@ If nothing shows up, check the MCP server logs - usually a missing or malformed 
 | `vonpay_checkout_capture_payment_intent` | Capture authorized funds (full or partial) |
 | `vonpay_checkout_void_payment_intent` | Release an auth hold pre-capture |
 | `vonpay_checkout_create_refund` | Refund a captured payment intent (`paymentIntent`) or a settled transaction (`transaction`) - exactly one, full or partial. Neither id is permission to refund: both are visible to the shopper's browser, so only refund an id from your own order records. |
-| `vonpay_checkout_create_token` | Vault a card. Pass `setupForFutureUse: "on_session"` for in-session reuse (upsells) or `"off_session"` for recurring / MIT; omit for single-use. |
+| `vonpay_checkout_create_token` | Vault a card. Pass `setupForFutureUse: "on_session"` for in-session reuse (upsells) or `"off_session"` for recurring / MIT; omit for single-use. Needs whatever your payment provider needs, such as a `providerReference` from your card form - on a test key too; no card is made up for you. |
 
 ### Diagnostics
 
 | Tool | What it does |
 |---|---|
 | `vonpay_checkout_health` | API health + latency |
-| `vonpay_checkout_list_test_cards` | Sandbox card numbers + their outcomes |
+| `vonpay_checkout_list_test_cards` | How to produce test-mode outcomes: the order total (not the card number) decides; returns the totals that produce each decline |
 | `vonpay_checkout_diagnose_error` | Take an error code, return structured `{ retryable, nextAction, llmHint, fix, docs, agentInstructions }` - pure data, no API call |
 
 ## Example agent prompts

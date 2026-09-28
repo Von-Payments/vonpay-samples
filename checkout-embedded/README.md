@@ -8,7 +8,7 @@ without sending the buyer to a hosted checkout page.
 - **Stack:** Node 20+ / Express 5 / TypeScript (server, run via `tsx`) +
   a static HTML/JS page (browser)
 - **Von Payments SDKs:**
-  - Server: `@vonpay/checkout-node` 2.x (`^2`)
+  - Server: `@vonpay/checkout-node` 2.x - 2.11.0 or later (`^2.11.0`)
   - Browser: the VORA Mirror SDK, loaded from
     `https://js.vonpay.com/v1/vora.js` (CDN `<script>` - there is no public
     npm package to install)
@@ -69,6 +69,10 @@ embedded flow (both shown in the banner once):
 - `vp_sk_test_...` - secret key (server-only)
 - `vp_pk_test_...` - publishable key (shipped to the browser)
 
+Test payments run on a sandbox account backed by a payment provider's test
+environment. A test key on a live account, or on a sandbox account with no
+payment provider, is refused with `422 sandbox_account_required`.
+
 ### 2. Configure and run
 
 ```bash
@@ -79,21 +83,20 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:4000](http://localhost:4000), type a sandbox test
-card, and click **Pay**.
+Open [http://localhost:4000](http://localhost:4000), type a test card, and
+click **Pay**.
 
-### 3. Test cards
+### 3. Test cards and outcomes
 
-Any future expiry, any 3-digit CVC. Sandbox mode never charges real money.
+A test key never moves real money. Enter any test card your sandbox's payment
+provider test environment accepts (your dashboard shows them for your sandbox).
 
-| Card                  | Outcome                                  |
-| --------------------- | ---------------------------------------- |
-| `4242 4242 4242 4242` | Succeeds; no 3DS challenge               |
-| `4000 0025 0000 3155` | 3DS challenge; succeeds after auth       |
-| `4000 0000 0000 9995` | Tokenizes, then declines at charge       |
-
-See [docs.vonpay.com/reference/test-cards](https://docs.vonpay.com/reference/test-cards)
-for the full matrix.
+The **order total** decides the outcome, not the card number: a card number
+never produces a decline, and an ordinary total like this sample's 49.99
+approves. To test a decline, change `AMOUNT` in `server.ts` to one of the
+totals listed in
+[docs.vonpay.com/reference/test-cards](https://docs.vonpay.com/reference/test-cards)
+(for example `200011`, i.e. 2,000.11, declines with `insufficient_funds`).
 
 ## Pinning the SDK version
 

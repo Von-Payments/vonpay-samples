@@ -33,6 +33,15 @@ const BASE_URL =
 
 const vonpay = new VonPayCheckout({ apiKey: SECRET_KEY, baseUrl: BASE_URL });
 
+// The saved card to charge (`vp_pmt_test_*` on a test key). Nothing is made up
+// for you in test mode: a test key runs on your sandbox account's payment
+// provider test environment, exactly like live. Without a card, some providers
+// refuse the create (`payment_method_required`) and others return
+// `requires_payment_method` for a front end to complete, so the script stops
+// before capture. To run the whole flow, save a card first (the saved-cards-mit
+// sample shows `tokens.create`) and put its token here.
+const PAYMENT_METHOD_ID = process.env["VON_PAY_PAYMENT_METHOD"]?.trim() || undefined;
+
 /**
  * Log an error from any step in the lifecycle.
  *
@@ -80,6 +89,7 @@ async function main(): Promise<void> {
         amount: 2500,
         currency: "USD",
         captureMethod: "manual",
+        ...(PAYMENT_METHOD_ID ? { paymentMethod: { id: PAYMENT_METHOD_ID } } : {}),
         metadata: { sample: "payment-intents-node", run_id: runId },
       },
       { idempotencyKey: createKey },
@@ -96,9 +106,10 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // The capture endpoint requires `authorized`. If the sandbox returned
-  // anything else (decline, processor quirk), bail cleanly so the operator
-  // can inspect rather than chasing a 422.
+  // The capture endpoint requires `authorized`. If the create returned
+  // anything else (a decline, `requires_payment_method` because no card was
+  // given, a processor quirk), bail cleanly so the operator can inspect rather
+  // than chasing a 422.
   if (intent.status !== "authorized") {
     console.error("create did not return authorized — aborting before capture", {
       id: intent.id,
@@ -157,6 +168,7 @@ async function main(): Promise<void> {
         amount: 2500,
         currency: "USD",
         captureMethod: "manual",
+        ...(PAYMENT_METHOD_ID ? { paymentMethod: { id: PAYMENT_METHOD_ID } } : {}),
         metadata: { sample: "payment-intents-node", run_id: runId },
       },
       { idempotencyKey: createKey },

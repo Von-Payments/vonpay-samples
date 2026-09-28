@@ -49,6 +49,13 @@ const BASE_URL =
 
 const vonpay = new VonPayCheckout({ apiKey: SECRET_KEY, baseUrl: BASE_URL });
 
+// The card to save, as your payment provider's own reference for it — e.g. the
+// vault handle your browser card form returns on submit. Nothing is made up for
+// you in test mode: a test key runs on your sandbox account's payment provider
+// test environment and needs exactly what that provider needs live. Providers
+// that require one refuse `tokens.create` without it (400 validation_error).
+const PROVIDER_REFERENCE = process.env["VON_PAY_PROVIDER_REFERENCE"]?.trim() || undefined;
+
 /** Pretty-print a VonPayError (or any thrown value) with the fields worth keeping. */
 function logError(label: string, err: unknown): void {
   if (err instanceof VonPayError) {
@@ -110,14 +117,15 @@ async function main(): Promise<void> {
   // vaulted single-use (omitted) or "on_session" is rejected with
   // `payment_method_consent_missing` on the MIT charge.
   //
-  // On a sandbox key the server auto-mints a mock card token; with a live
-  // iframe-vault provider you'd pass `providerReference` (the browser-minted
-  // vault handle from Vora Mirror's elements.submit()) — see the README.
+  // The card itself comes from `providerReference` (the vault handle your
+  // browser card form returned) — see PROVIDER_REFERENCE above and the README.
+  // Test and live keys work the same way here; nothing is auto-created.
   let token: Token;
   try {
     token = await vonpay.tokens.create(
       {
         buyerId,
+        ...(PROVIDER_REFERENCE ? { providerReference: PROVIDER_REFERENCE } : {}),
         setupForFutureUse: "off_session",
         metadata: { sample: "saved-cards-mit", subscription_id: subscriptionId },
       },
@@ -211,10 +219,11 @@ async function main(): Promise<void> {
   // absent. The `mit` block tags it for scheme-level stored-credential
   // compliance and anchors it to the CIT id from step 3.
   if (!mitSupported) {
-    // Sandbox / processors without MIT enabled report `mit: false`. We don't
+    // Payment providers without MIT enabled report `mit: false` — on a test
+    // key too, since a sandbox reports its own provider's matrix. We don't
     // fake a renewal — we tell you exactly why it's skipped and what to do.
     console.log("skipping MIT renewal — supportedOperations.mit is false", {
-      hint: "Sandbox keys report mit:false. Connect a live processor with MIT support enabled to run the renewal.",
+      hint: "This account's payment provider reports mit:false. Use a payment provider with MIT support enabled to run the renewal.",
       anchorTransactionId: anchor.id,
     });
     console.log("done (anchor + saved card only)");

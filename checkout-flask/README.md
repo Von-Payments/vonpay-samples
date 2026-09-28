@@ -3,7 +3,7 @@
 Minimal end-to-end reference integration on Flask 3: create a session, redirect the buyer to `checkout.vonpay.com`, confirm the outcome server-side on `/success`, and verify HMAC webhooks on `/webhooks`. Python equivalent of the Express and Next.js samples.
 
 - **Stack:** Flask 3+, Python 3.9+
-- **Von Payments SDK:** [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) 2.x - 2.7 or later (`>=2.7,<3`)
+- **Von Payments SDK:** [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) 2.x - 2.11 or later (`>=2.11,<3`)
 - **What it demonstrates:** session creation with an idempotency key, server-side return confirmation, HMAC webhook verification with raw-body parsing
 
 ## 5-minute setup

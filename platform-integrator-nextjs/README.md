@@ -3,7 +3,7 @@
 Multi-tenant reference integration for platforms (CRMs, subscription engines, ISVs) that resell Von Payments to their own merchants. Demonstrates the per-tenant credential pattern: each merchant onboarded to the platform has their own Von Payments API key and webhook signing secret stored on the platform side; the platform looks up the right credentials at charge time and at webhook time.
 
 - **Stack:** Next.js 15 / React 19 / TypeScript strict
-- **Von Payments SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x - 2.7.0 or later (`^2.7.0`)
+- **Von Payments SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x - 2.11.0 or later (`^2.11.0`)
 - **Best for:** subscription-billing CRMs, headless commerce platforms, ISV cart products, marketplace operators - anywhere your product has many "merchants" and each wants to plug Von Payments in as their gateway
 
 ## What it demonstrates
@@ -121,7 +121,7 @@ The signature is verified using the **tenant's** per-endpoint `whsec_*` secret (
 
 `constructEvent` takes **three** arguments - `(rawBody, signatureHeader, whsec)`. The signed timestamp lives inside the `x-vonpay-signature` header (`t=<unix>,v1=<hex>`); there is no separate timestamp header.
 
-**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0, hence `^2.7.0`).
+**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^2.11.0` covers it).
 
 ### Idempotent event processing
 

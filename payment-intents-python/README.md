@@ -3,7 +3,7 @@
 Server-side payment intent flow: **authorize -> capture -> partial refund**, plus an idempotency replay. Single-script Python demo against the Vonpay Checkout API.
 
 - **Stack:** Python 3.9+, type-hinted
-- **SDK:** [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) 2.x (`>=2,<3`)
+- **SDK:** [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) 2.x - 2.11 or later (`>=2.11,<3`)
 - **Best for:** B2B / invoicing flows, headless billing where the merchant server drives the lifecycle (no hosted checkout)
 
 ## What it demonstrates
@@ -21,13 +21,21 @@ Every step goes through the SDK - `payment_intents.create`, `payment_intents.cap
 
 ### 1. Get a sandbox key
 
-[vonpay.com/developers](https://vonpay.com/developers) -> **Activate Vora Sandbox** in the dashboard. You'll get a `vp_sk_test_...` secret key - that's all this sample needs.
+[vonpay.com/developers](https://vonpay.com/developers) -> **Activate Vora Sandbox** in the dashboard. You'll get a `vp_sk_test_...` secret key.
 
-### 2. Configure + run
+Test payments run on a sandbox account backed by a payment provider's test environment, and behave exactly as they would on that provider live. A test key on a live account, or on a sandbox account with no payment provider, is refused with `422 sandbox_account_required`.
+
+### 2. A saved card to charge
+
+Nothing is made up for you in test mode, so the payment intent needs a real saved card (`vp_pmt_test_...`) from your sandbox. Save one with `tokens.create` and set it as `VON_PAY_PAYMENT_METHOD`.
+
+Without it, depending on your payment provider, the create is refused with `payment_method_required` or returns `requires_payment_method` (for a front end to finish), and the script stops before capture.
+
+### 3. Configure + run
 
 ```bash
 cp .env.example .env
-# edit .env - paste in vp_sk_test_...
+# edit .env - paste in vp_sk_test_... and vp_pmt_test_...
 
 python -m venv .venv
 source .venv/bin/activate    # Windows: .venv\Scripts\activate
@@ -36,7 +44,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-The script runs once and exits. Expected output (sandbox happy path):
+The script runs once and exits. Expected output when the card is approved:
 
 ```
 payment-intents-python sample {'base_url': 'https://checkout.vonpay.com', 'run_id': '...'}
@@ -54,7 +62,7 @@ The two intent IDs in `idempotency-replay` are identical because the server shor
 | File | What it does |
 |---|---|
 | `main.py` | The sample - runnable end-to-end |
-| `requirements.txt` | `vonpay-checkout>=2,<3` + `python-dotenv` for `.env` loading |
+| `requirements.txt` | `vonpay-checkout>=2.11,<3` + `python-dotenv` for `.env` loading |
 | `.env.example` | Copy to `.env` and paste your sandbox key |
 
 ## Configuration
@@ -62,6 +70,7 @@ The two intent IDs in `idempotency-replay` are identical because the server shor
 | Env var | Required | Default |
 |---|---|---|
 | `VON_PAY_SECRET_KEY` | yes | - |
+| `VON_PAY_PAYMENT_METHOD` | to run past create | - |
 | `VON_PAY_BASE_URL` | no | `https://checkout.vonpay.com` |
 
 The default base URL is production (`checkout.vonpay.com`). A `vp_sk_test_` key runs in sandbox mode there, so no host change is needed; set `VON_PAY_BASE_URL` only if support directs you to a different host.
@@ -92,12 +101,12 @@ Each step is wrapped in `try`/`except VonPayError`. `VonPayError` carries:
 - Move `VON_PAY_SECRET_KEY` into your secret manager (AWS Secrets Manager, Vault, Doppler, etc.). Never commit it.
 - Treat `Idempotency-Key` as required, not optional. Use a deterministic value tied to the upstream order (e.g. `f"order:{order_id}:authorize"`) so retries collapse cleanly.
 - Read `vonpay.capabilities.get()` once at startup - it tells you whether `void_after_capture` is `rerouted_to_refund` (most processors), so you can branch between void and refund without round-tripping a failed call.
-- Inspect `intent.status` after `create`. Sandbox returns `failed` for amount `200` (deterministic decline trigger) - your code should handle the decline path, not just the happy path.
+- Inspect `intent.status` after `create` - your code should handle the decline path, not just the happy path. In test mode the order total decides the outcome, not the card: an ordinary total approves, and specific totals decline (for example `200011`, i.e. 2,000.11, returns `insufficient_funds`). The full list is in [Test mode](https://docs.vonpay.com/reference/test-cards).
 
 ## Reference docs
 
 - [Payment intents guide](https://docs.vonpay.com/integration/payment-intents) - full lifecycle walkthrough
-- [Test cards + sandbox triggers](https://docs.vonpay.com/reference/test-cards)
+- [Test mode - the order totals that decline](https://docs.vonpay.com/reference/test-cards)
 - [Error codes](https://docs.vonpay.com/reference/error-codes)
 
 ## Tested against

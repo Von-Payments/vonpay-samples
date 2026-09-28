@@ -21,7 +21,13 @@ import sys
 import time
 
 from dotenv import load_dotenv
-from vonpay.checkout import PaymentIntent, Refund, VonPayCheckout, VonPayError
+from vonpay.checkout import (
+    PaymentIntent,
+    PaymentMethodRef,
+    Refund,
+    VonPayCheckout,
+    VonPayError,
+)
 
 load_dotenv()
 
@@ -37,6 +43,16 @@ BASE_URL = (
     os.environ.get("VON_PAY_BASE_URL", "").rstrip("/")
     or "https://checkout.vonpay.com"
 )
+
+# The saved card to charge (``vp_pmt_test_*`` on a test key). Nothing is made
+# up for you in test mode: a test key runs on your sandbox account's payment
+# provider test environment, exactly like live. Without a card, some providers
+# refuse the create (``payment_method_required``) and others return
+# ``requires_payment_method`` for a front end to complete, so the script stops
+# before capture. To run the whole flow, save a card first with
+# ``tokens.create`` and put its token here.
+PAYMENT_METHOD_ID = os.environ.get("VON_PAY_PAYMENT_METHOD", "").strip() or None
+PAYMENT_METHOD = PaymentMethodRef(id=PAYMENT_METHOD_ID) if PAYMENT_METHOD_ID else None
 
 vonpay = VonPayCheckout(SECRET_KEY, base_url=BASE_URL)
 
@@ -88,6 +104,7 @@ def main() -> None:
             amount=2500,
             currency="USD",
             capture_method="manual",
+            payment_method=PAYMENT_METHOD,
             metadata={"sample": "payment-intents-python", "run_id": run_id},
             idempotency_key=create_key,
         )
@@ -105,9 +122,10 @@ def main() -> None:
         log_error("create", err)
         sys.exit(1)
 
-    # The capture endpoint requires `authorized`. If the sandbox returned
-    # anything else (decline, processor quirk), bail cleanly so the operator
-    # can inspect rather than chasing a 422.
+    # The capture endpoint requires `authorized`. If the create returned
+    # anything else (a decline, `requires_payment_method` because no card was
+    # given, a processor quirk), bail cleanly so the operator can inspect
+    # rather than chasing a 422.
     if intent.status != "authorized":
         print(
             "create did not return authorized — aborting before capture",
@@ -169,6 +187,7 @@ def main() -> None:
             amount=2500,
             currency="USD",
             capture_method="manual",
+            payment_method=PAYMENT_METHOD,
             metadata={"sample": "payment-intents-python", "run_id": run_id},
             idempotency_key=create_key,
         )

@@ -125,14 +125,10 @@
     <div id="status" class="status"></div>
 
     <div class="test-cards">
-      <strong>Sandbox test cards</strong> (any future expiry, any 3-digit CVC):
-      <ul>
-        <li><code>4242 4242 4242 4242</code> — succeeds, no 3DS challenge</li>
-        <li>
-          <code>4000 0025 0000 3155</code> — 3DS challenge, succeeds after auth
-        </li>
-        <li><code>4000 0000 0000 9995</code> — tokenizes, then declines at charge</li>
-      </ul>
+      <strong>Test mode:</strong> enter any test card your sandbox's payment
+      provider accepts. The order total decides the outcome, not the card: this
+      49.99 total approves, and specific totals decline — see
+      <a href="https://docs.vonpay.com/reference/test-cards">Test mode</a>.
     </div>
 
     <script type="module" src="/checkout.js"></script>

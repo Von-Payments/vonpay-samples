@@ -3,7 +3,7 @@
 End-to-end reference integration for the **cart → redirect** pattern (Shopify-style hosted checkout). A merchant server creates a session, redirects the buyer to `checkout.vonpay.com`, and confirms the outcome server-side on return and from an HMAC-signed webhook when the session resolves.
 
 - **Stack:** Next.js 15 App Router, React 19, TypeScript strict
-- **Von Payments SDK:** `@vonpay/checkout-node` 2.x - 2.7.0 or later (`^2.7.0`)
+- **Von Payments SDK:** `@vonpay/checkout-node` 2.x - 2.11.0 or later (`^2.11.0`)
 - **What it demonstrates:** session creation with an idempotency key, server-side return confirmation, HMAC webhook verification, security headers (CSP / HSTS / X-Frame-Options)
 
 ## 5-minute setup
@@ -58,12 +58,12 @@ The `sessions.create()` call receives a fully-typed request plus an idempotency 
 
 Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header - there is no separate timestamp header). `vonpay.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent` discriminated union. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) - not your API key.
 
-**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0, hence `^2.7.0`).
+**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^2.11.0` covers it).
 
 ## Security notes
 
 - **Always use raw body for webhook verification.** Next.js route handlers give you `req.text()` - use it directly, don't `JSON.parse()` first.
-- **Pin the SDK.** `"latest"` drifts silently; this sample pins the major with a 2.7.0 floor (`^2.7.0`) and commits a lockfile.
+- **Pin the SDK.** `"latest"` drifts silently; this sample pins the major with a 2.11.0 floor (`^2.11.0`) and commits a lockfile.
 - **Two different secrets.** The webhook signing secret (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) signs webhooks. The API key (`vp_sk_*`) authenticates API calls and is what confirms a return. A per-merchant session signing secret (`ss_*`) is not used: it cannot verify the return redirect. Never swap them.
 - **Security headers ship in `next.config.ts`.** Remove them only if you have a deliberate reason.
 

@@ -20,7 +20,7 @@
  *   POST /webhooks     Verify the signature, then act on payment_intent.* to
  *                      confirm the post-challenge terminal state.
  *
- * Written against @vonpay/checkout-node 2.x — 2.7.0 or later. 2.5.0 is the
+ * Written against @vonpay/checkout-node 2.x — 2.11.0 or later. 2.5.0 is the
  * first release that types `returnUrl` on `paymentIntents.create`, and 2.7.0
  * the first that types `test_event` on webhook events. Every field
  * this sample sends and reads is on the SDK's typed surface: no casts, no local
@@ -68,6 +68,11 @@ const returnUrl =
   `http://localhost:${port}/3ds/return`;
 
 const vonpay = new VonPayCheckout({ apiKey, baseUrl });
+
+// Optional default saved card (`vp_pmt_test_*` on a test key) for the Pay
+// button, so the demo runs without a front-end card form. A `paymentMethod` in
+// the POST /charge body overrides it.
+const defaultPaymentMethodId = process.env.VON_PAY_PAYMENT_METHOD?.trim() || undefined;
 
 // ─── Reading the 3DS redirect off the intent ──────────────────────────────
 //
@@ -130,13 +135,21 @@ app.post("/charge", async (req: Request, res: Response): Promise<void> => {
   const body = (req.body ?? {}) as { paymentMethod?: unknown; amount?: unknown };
 
   // In a real app this token comes from POST /v1/tokens (or VORA Mirror's
-  // tokenize/submit) on the front end. The sandbox 3DS-challenge token below
-  // is documented in the Test Cards reference — it deterministically returns
-  // `requires_action` then settles to `succeeded` after the challenge.
+  // tokenize/submit) on the front end. There is no made-up test token: in test
+  // mode a `vp_pmt_test_*` token is a real card saved on your sandbox account's
+  // payment provider test environment, and whether the bank challenges is up to
+  // that environment — use a card your provider's test environment challenges.
   const paymentMethodId =
     typeof body.paymentMethod === "string" && body.paymentMethod.length > 0
       ? body.paymentMethod
-      : "vp_pmt_test_3ds_success_sample";
+      : defaultPaymentMethodId;
+  if (!paymentMethodId) {
+    res.status(400).json({
+      error:
+        "No saved card to charge. Send { paymentMethod: \"vp_pmt_...\" } or set VON_PAY_PAYMENT_METHOD.",
+    });
+    return;
+  }
 
   const orderId = `ord_${Date.now().toString(36)}`;
 
@@ -361,9 +374,9 @@ app.get("/", (_req, res) => {
   res.type("html").send(
     [
       "<h1>Von Payments — Payment Intents 3DS sample</h1>",
-      "<p>Click pay to create a manual-capture intent with a sandbox 3DS",
-      "challenge token. The server redirects you to the issuer challenge,",
-      "then confirms the outcome from the webhook.</p>",
+      "<p>Click pay to create a manual-capture intent with the saved card in",
+      "VON_PAY_PAYMENT_METHOD. If the bank challenges, the server redirects",
+      "you to the issuer challenge, then confirms the outcome from the webhook.</p>",
       '<form action="/charge" method="POST">',
       "  <button type=\"submit\">Pay $49.99 (3DS challenge)</button>",
       "</form>",

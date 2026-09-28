@@ -3,7 +3,7 @@
 Server-side **save-a-card, then rebill it** flow: vault a reusable card, run the cardholder-initiated anchor charge, then fire a **merchant-initiated (MIT)** recurring renewal against the card on file. Single-script Node.js demo against the Vonpay Checkout API.
 
 - **Stack:** Node 20+, TypeScript strict, ESM
-- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x (`^2`)
+- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x - 2.11.0 or later (`^2.11.0`)
 - **Best for:** Subscriptions, recurring billing, scheduled installments, retry/dunning loops - anywhere you charge a saved card while the buyer is not present.
 
 ## What it demonstrates
@@ -41,37 +41,47 @@ A **merchant-initiated transaction (MIT)** is any charge you drive against that 
 
 ### 1. Get a sandbox key
 
-[vonpay.com/developers](https://vonpay.com/developers) → **Activate Vora Sandbox** in the dashboard. You'll get a `vp_sk_test_…` secret key - that's all this sample needs.
+[vonpay.com/developers](https://vonpay.com/developers) → **Activate Vora Sandbox** in the dashboard. You'll get a `vp_sk_test_…` secret key.
 
-### 2. Configure + run
+Test payments run on a sandbox account backed by a payment provider's test environment, and behave exactly as they would on that provider live. A test key on a live account, or on a sandbox account with no payment provider, is refused with `422 sandbox_account_required`.
+
+### 2. The card to save
+
+Nothing is made up for you in test mode: `tokens.create` saves a real card on your sandbox's payment provider test environment, and needs whatever that provider needs - for example a `providerReference`, the vault handle your browser card form returns on submit (see [Where the card details come from](#where-the-card-details-come-from)). Set it as `VON_PAY_PROVIDER_REFERENCE`. A provider that needs one refuses the save without it (`400 validation_error`).
+
+### 3. Configure + run
 
 ```bash
 cp .env.example .env
-# edit .env - paste in vp_sk_test_...
+# edit .env - paste in vp_sk_test_... and the provider reference
 
 npm install
 npm run dev
 ```
 
-The script runs once and exits. Expected output on a sandbox key (which reports `mit: false`):
+The script runs once and exits. Expected output when the payment provider reports `mit: false`:
 
 ```
 saved-cards-mit sample { baseUrl: 'https://checkout.vonpay.com', runId: '...' }
 capabilities { mit: false, networkTokens: false }
-vaulted card { id: 'vp_pmt_test_...', status: 'active', setupForFutureUse: 'off_session', card: 'visa •••• 4242 (12/2030)' }
+vaulted card { id: 'vp_pmt_test_...', status: 'active', setupForFutureUse: 'off_session', card: '<brand> •••• <last4> (<exp>)' }
 anchor charge (CIT) { id: 'vpi_test_...', status: 'succeeded', amount: 2999, currency: 'USD', declineCode: null }
 skipping MIT renewal - supportedOperations.mit is false { hint: '...', anchorTransactionId: 'vpi_test_...' }
 done (anchor + saved card only)
 ```
 
-On a **live processor with MIT support enabled** (`mit: true`), the script continues into step 4 and you'll also see:
+With a **payment provider that has MIT support enabled** (`mit: true`), the script continues into step 4 and you'll also see:
 
 ```
-renewal charge (MIT) { id: 'vpi_live_...', status: 'succeeded', amount: 2999, currency: 'USD', declineCode: null }
-done { savedCard: 'vp_pmt_live_...', anchorTransactionId: 'vpi_live_...', renewalTransactionId: 'vpi_live_...' }
+renewal charge (MIT) { id: 'vpi_test_...', status: 'succeeded', amount: 2999, currency: 'USD', declineCode: null }
+done { savedCard: 'vp_pmt_test_...', anchorTransactionId: 'vpi_test_...', renewalTransactionId: 'vpi_test_...' }
 ```
 
-> **Sandbox gates MIT off.** `supportedOperations.mit` is `false` on sandbox keys, so the sample stops cleanly after the anchor charge rather than faking a renewal. This is exactly how your code should behave - branch on the capability matrix, never hard-code per-processor assumptions. To exercise the full MIT path, run against a live key whose processor has MIT enabled.
+(On a live key the ids read `_live_` instead of `_test_`.)
+
+> **Branch on the capability matrix.** `supportedOperations.mit` reports what your account's payment provider supports - on a test key too, since a sandbox reports its own provider's matrix. When it is `false` the sample stops cleanly after the anchor charge rather than faking a renewal. This is exactly how your code should behave - never hard-code per-processor assumptions.
+>
+> In test mode the order total decides whether a charge is approved, not the card: this sample's 29.99 approves, and specific totals decline (see [Test mode](https://docs.vonpay.com/reference/test-cards)).
 
 ## Scripts
 
@@ -86,15 +96,16 @@ done { savedCard: 'vp_pmt_live_...', anchorTransactionId: 'vpi_live_...', renewa
 | Env var | Required | Default |
 |---|---|---|
 | `VON_PAY_SECRET_KEY` | yes | - |
+| `VON_PAY_PROVIDER_REFERENCE` | when your payment provider needs one | - |
 | `VON_PAY_BASE_URL` | no | `https://checkout.vonpay.com` |
 
 The default base URL is production (`checkout.vonpay.com`). A `vp_sk_test_` key runs in sandbox mode there, so no host change is needed; set `VON_PAY_BASE_URL` only if support directs you to a different host.
 
 ## Where the card details come from
 
-This sample uses a **sandbox** key, where `tokens.create` auto-mints a mock card token for you - no card data crosses your server, which is the point of tokenization.
+Nothing is auto-created, on a test key or a live one: `tokens.create` saves the card your payment provider already holds, and no card data crosses your server - which is the point of tokenization.
 
-In production with an iframe-vault provider, the buyer's card never touches your server either. Your browser front-end (e.g. [VORA Mirror](https://docs.vonpay.com/mirror/quickstart)) collects the card in a hosted iframe and mints a vault handle; you pass that handle as `providerReference` to `tokens.create`, along with `setupForFutureUse: "off_session"` to capture reuse consent. The resulting `vp_pmt_*` token is what you keep on file and rebill.
+With an iframe-vault provider, the buyer's card never touches your server. Your browser front-end (e.g. [VORA Mirror](https://docs.vonpay.com/mirror/quickstart)) collects the card in a hosted iframe and mints a vault handle; you pass that handle as `providerReference` to `tokens.create`, along with `setupForFutureUse: "off_session"` to capture reuse consent. The resulting `vp_pmt_*` token is what you keep on file and rebill.
 
 ```typescript
 const token = await vonpay.tokens.create({
@@ -181,7 +192,7 @@ If the token isn't vaulted off-session, the MIT charge would be rejected with `p
 
 - [Payment intents guide - saved cards / MIT](https://docs.vonpay.com/integration/payment-intents#saved-cards--merchant-initiated-mit-charges)
 - [Tokenization - reusability model](https://docs.vonpay.com/mirror/tokenization)
-- [Test cards + sandbox triggers](https://docs.vonpay.com/reference/test-cards)
+- [Test mode - the order totals that decline](https://docs.vonpay.com/reference/test-cards)
 - [Error codes](https://docs.vonpay.com/reference/error-codes)
 
 ## Tested against

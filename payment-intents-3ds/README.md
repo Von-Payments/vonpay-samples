@@ -3,7 +3,7 @@
 Server-side handling for a payment intent that returns **`requires_action`** - the issuer wants to challenge the buyer (3D Secure / Strong Customer Authentication). Single Express server that creates the intent, redirects the buyer to the bank's challenge page, and confirms the terminal outcome from the webhook.
 
 - **Stack:** Node 20+, TypeScript strict, ESM, Express 5
-- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x - **2.7.0 or later** (`^2.7.0`): 2.5.0 is the first release that types `returnUrl` on `paymentIntents.create`, and 2.7.0 the first that types `test_event` on webhook events
+- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x - **2.11.0 or later** (`^2.11.0`): 2.5.0 is the first release that types `returnUrl` on `paymentIntents.create`, and 2.7.0 the first that types `test_event` on webhook events
 - **Best for:** server-driven (Payment Intents) integrations in regions where SCA applies (EU/UK/EEA), or any flow where the issuer may step up to 3DS
 
 ## The 3DS server-side model in one paragraph
@@ -35,11 +35,17 @@ Everything this sample sends and reads is on the SDK's typed surface - `paymentM
 
 [vonpay.com/developers](https://vonpay.com/developers) → **Activate Vora Sandbox**. You'll get a `vp_sk_test_…` secret key. Create a webhook endpoint pointing at your public `/webhooks` URL - you'll be shown a `whsec_…` signing secret once.
 
-### 2. Configure + run
+Test payments run on a sandbox account backed by a payment provider's test environment, and behave exactly as they would on that provider live. A test key on a live account, or on a sandbox account with no payment provider, is refused with `422 sandbox_account_required`.
+
+### 2. A saved card to charge
+
+This server-only sample charges a card that is already saved (`vp_pmt_test_…`). Nothing is made up for you in test mode: save a real card on your sandbox with `tokens.create` (see the [saved-cards-mit](../saved-cards-mit) sample), using a test card your payment provider's test environment challenges for 3-D Secure. Set its token as `VON_PAY_PAYMENT_METHOD`, or send it as `paymentMethod` on each `/charge`. Without either, `/charge` answers `400` and charges nothing.
+
+### 3. Configure + run
 
 ```bash
 cp .env.example .env
-# edit .env - paste in vp_sk_test_... and whsec_...
+# edit .env - paste in vp_sk_test_..., whsec_... and vp_pmt_test_...
 
 npm install
 npm run dev
@@ -50,25 +56,18 @@ Open `http://localhost:3000` and click **Pay**, or drive it from curl:
 ```bash
 curl -i -X POST http://localhost:3000/charge \
   -H "Content-Type: application/json" \
-  -d '{ "paymentMethod": "vp_pmt_test_3ds_success_sample", "amount": 4999 }'
+  -d '{ "paymentMethod": "vp_pmt_test_..." }'
 ```
 
-With a 3DS token, `/charge` responds `303` with a `Location` header pointing at the sandbox challenge URL - that's the redirect your buyer's browser follows.
+When the bank challenges, `/charge` responds `303` with a `Location` header pointing at the challenge URL - that's the redirect your buyer's browser follows.
 
-## Triggering 3DS in the sandbox
+## Getting a 3DS challenge in test mode
 
-The sandbox encodes the intended outcome in the token's middle segment (see the [Test Cards reference](https://docs.vonpay.com/reference/test-cards)). Pass the token to `/charge` as `paymentMethod`:
+Whether the bank challenges is decided by your sandbox's payment provider test environment, from the card you saved - Von Payments does not simulate it. Use a card that provider documents as challenging for 3-D Secure (your dashboard shows the provider's test cards for your sandbox).
 
-| Token | Outcome |
-|---|---|
-| `vp_pmt_test_3ds_success_<anything>` | `requires_action` → (after challenge) `payment_intent.succeeded` |
-| `vp_pmt_test_3ds_fail_<anything>` | `requires_action` → (after challenge) `payment_intent.failed` (`decline_code: fraud_suspected`) |
-| `vp_pmt_test_success_<anything>` | `authorized` immediately - no challenge (auto-capture path → `succeeded`) |
-| `vp_pmt_test_decline_<reason>_<anything>` | `failed` before any challenge |
+Declines are decided by the order total, not the card: an ordinary total like this sample's 49.99 approves, and specific totals decline (see [Test mode](https://docs.vonpay.com/reference/test-cards)).
 
-`/charge` defaults to `vp_pmt_test_3ds_success_sample` when you don't pass a token, so the happy-path 3DS branch runs out of the box. `vp_pmt_test_*` tokens are sandbox-only - they're rejected with `payment_method_inactive` on live keys.
-
-The card numbers behind these tokens (e.g. `4000 0027 6000 3184` for 3DS success) come from VORA Mirror tokenization on your front end in a real integration; this server-only sample uses the synthetic tokens directly so it runs without a browser card form.
+`vp_pmt_test_*` tokens work only with test keys - a live key refuses one with `400 payment_method_mode_mismatch`.
 
 ## Why the webhook is the source of truth
 
@@ -79,11 +78,11 @@ The buyer's browser returning to `/3ds/return` tells you the challenge *finished
 
 `vonpay.webhooks.constructEvent` verifies the signature and returns the typed `WebhookEvent` union, which includes the `payment_intent.*` events - discriminator `type`, body nested under `data`, decline reason at `data.failure_reason` (see the [webhook events reference](https://docs.vonpay.com/integration/webhook-events)). Switching on `event.type` narrows `event.data`, so there is no second parse and no widened type. Dedupe redeliveries on the event `id` (`vp_evt_*`) with a durable store.
 
-**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0, hence `^2.7.0`).
+**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^2.11.0` covers it).
 
 ### Testing the webhook locally
 
-Expose your local server (e.g. `cloudflared tunnel --url http://localhost:3000` or `ngrok http 3000`), register the public `/webhooks` URL in the dashboard, then run a `/charge` with a 3DS token and complete the sandbox challenge. The `payment_intent.succeeded` / `.failed` event lands on `/webhooks` within seconds of the bank's terminal callback.
+Expose your local server (e.g. `cloudflared tunnel --url http://localhost:3000` or `ngrok http 3000`), register the public `/webhooks` URL in the dashboard, then run a `/charge` with a card that gets challenged and complete the test challenge. The `payment_intent.succeeded` / `.failed` event lands on `/webhooks` within seconds of the bank's terminal callback.
 
 ## Scripts
 
@@ -99,6 +98,7 @@ Expose your local server (e.g. `cloudflared tunnel --url http://localhost:3000` 
 |---|---|---|
 | `VON_PAY_SECRET_KEY` | yes | - |
 | `VON_PAY_WEBHOOK_SECRET` | yes | - |
+| `VON_PAY_PAYMENT_METHOD` | unless each `/charge` sends `paymentMethod` | - |
 | `VON_PAY_BASE_URL` | no | `https://checkout.vonpay.com` |
 | `VON_PAY_RETURN_URL` | no | `http://localhost:{PORT}/3ds/return` |
 | `PORT` | no | `3000` |
@@ -117,8 +117,8 @@ The default base URL is production (`checkout.vonpay.com`). A `vp_sk_test_` key 
 
 - [Payment intents - authentication challenges (3DS)](https://docs.vonpay.com/integration/payment-intents#authentication-challenges-3ds)
 - [Webhooks](https://docs.vonpay.com/integration/webhooks) - signature verification + event types
-- [Test cards + sandbox triggers](https://docs.vonpay.com/reference/test-cards)
+- [Test mode - the order totals that decline](https://docs.vonpay.com/reference/test-cards)
 
 ## Tested against
 
-`@vonpay/checkout-node` 2.x (2.7.0 or later) - typecheck with `npm run typecheck`. End-to-end 3DS smoke (charge → redirect → challenge → `payment_intent.succeeded` webhook) requires a `vp_sk_test_…` key plus a publicly reachable `/webhooks` URL.
+`@vonpay/checkout-node` 2.x (2.11.0 or later) - typecheck with `npm run typecheck`. End-to-end 3DS smoke (charge → redirect → challenge → `payment_intent.succeeded` webhook) requires a `vp_sk_test_…` key plus a publicly reachable `/webhooks` URL.
