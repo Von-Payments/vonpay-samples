@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getTenant } from "@/lib/tenants";
 import { CUSTOMERS } from "@/lib/customers";
+import { formatMinorAmount } from "@/lib/money";
 
 // Render on every request. Each charge form below carries an order id minted
 // at render time; a cached render would hand every visitor the SAME ids, and
@@ -57,21 +58,18 @@ export default async function TenantPage({ params }: Props) {
                 a separate purchase gets a separate render and a new id. In
                 production, create the order row first and use its id. */}
             <input type="hidden" name="orderId" value={`ord_${randomUUID()}`} />
+            {/* Only WHICH customer — never the amount. The charge route looks
+                the price up on the server; anything in this form can be
+                edited by whoever is looking at the page. */}
             <input type="hidden" name="customerId" value={c.id} />
-            <input type="hidden" name="customerEmail" value={c.email} />
-            <input
-              type="hidden"
-              name="amountCents"
-              value={Math.round(c.lastAmountDollars * 100)}
-            />
             <div>
               <div style={{ fontWeight: 600 }}>{c.name}</div>
               <div className="muted" style={{ marginTop: 4 }}>
-                {c.email} · ${c.lastAmountDollars.toFixed(2)}
+                {c.email} · {formatMinorAmount(c.chargeAmount, c.currency)}
               </div>
             </div>
             <button type="submit" className="btn btn-primary">
-              Charge ${c.lastAmountDollars.toFixed(2)} →
+              Charge {formatMinorAmount(c.chargeAmount, c.currency)} →
             </button>
           </form>
         ))}
@@ -91,8 +89,14 @@ export default async function TenantPage({ params }: Props) {
         >
           <li>
             Form POSTs to <code>/api/charge</code> with{" "}
-            <code>tenantId={tenant.id}</code> and an <code>orderId</code>{" "}
-            minted when this page rendered.
+            <code>tenantId={tenant.id}</code>, the <code>customerId</code>, and
+            an <code>orderId</code> minted when this page rendered. No amount
+            is sent.
+          </li>
+          <li>
+            Server looks the customer up in its own records and takes the
+            amount and currency from there — the browser cannot change the
+            price.
           </li>
           <li>
             Server resolves the tenant&apos;s <code>vp_sk</code> via{" "}

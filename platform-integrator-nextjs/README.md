@@ -55,7 +55,7 @@ Open `http://localhost:3000`:
 
 1. Click into a tenant (e.g. **Acme Vitamins**)
 2. Click **Charge** on a customer row
-3. The browser hits `/api/charge`, which looks up Acme's keys and creates a session
+3. The browser hits `/api/charge` with the customer id only. The route looks up Acme's keys and the customer's price on the server, and creates a session. The browser never sends an amount - anything a browser sends can be edited, so the price must come from your own records
 4. You're redirected to the Von Payments hosted checkout
 5. Complete with a [test card](https://docs.vonpay.com/reference/test-cards) (e.g. `4242 4242 4242 4242`)
 6. Return to `/tenants/tenant_a/confirm` - the page re-reads the session from the API using **Acme's** own secret key, not the other tenants'. ⚠️ It does NOT verify the return signature: that signature uses a platform-wide secret no tenant holds, so a per-tenant check could only ever fail. The per-tenant isolation here comes from the API key, which is the stronger guarantee
@@ -144,6 +144,7 @@ Webhook deliveries are retried on failure. The receiver must dedupe. The sample 
 
 ## What this sample doesn't cover
 
+- **Sign-in** - `/api/charge` is open so the sample runs locally with no setup. Put it behind your platform's own sign-in before deploying, and check that the signed-in user may act for the tenant in the request.
 - **Per-tenant rate limiting** - your platform should rate-limit charge POSTs per tenant to prevent abuse; not shown here.
 - **Outbound webhooks to your merchants** - your platform may want to forward `charge.succeeded` events to the merchant's own webhook URL (their internal CRM, fulfillment system). Not in scope of this sample. (Not `session.succeeded`: the server emits `session.*` internally, but those keys are not in the merchant subscription catalog, so an endpoint subscribed to one receives nothing, forever.)
 - **Captures, voids, and refunds** - the SDK exposes `paymentIntents.capture`, `paymentIntents.void`, and `refunds.create` natively. A platform would call these with the tenant's `vp_sk`, the same way `/api/charge` does for sessions.

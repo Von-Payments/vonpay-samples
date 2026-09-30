@@ -201,16 +201,21 @@ function readError(err) {
   return String(err);
 }
 
+// `minor` is in MINOR units, as the API sends it. Not every currency has 2
+// decimals (JPY has 0, KWD has 3), so ask the currency data instead of
+// dividing by 100.
 function formatAmount(minor, currency) {
   if (typeof minor !== "number") return "";
+  const code = (currency ?? "USD").toUpperCase();
+  let formatter;
   try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: currency ?? "USD",
-    }).format(minor / 100);
+    formatter = new Intl.NumberFormat(undefined, { style: "currency", currency: code });
   } catch {
-    return `${(minor / 100).toFixed(2)} ${currency ?? ""}`.trim();
+    // Not a well-formed currency code (Intl throws). Show the raw minor units rather than guess.
+    return `${minor} ${code} (minor units)`;
   }
+  const exponent = formatter.resolvedOptions().maximumFractionDigits ?? 2;
+  return formatter.format(minor / 10 ** exponent);
 }
 
 function escapeHtml(value) {

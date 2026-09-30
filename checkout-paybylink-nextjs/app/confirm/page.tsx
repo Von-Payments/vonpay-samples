@@ -1,4 +1,5 @@
 import { VonPayCheckout } from "@vonpay/checkout-node";
+import { formatMinorAmount } from "@/lib/money";
 
 export default async function ConfirmPage({
   searchParams,
@@ -98,7 +99,9 @@ export default async function ConfirmPage({
   // confirmation for any figure they like. `outcome.amount` came back from the
   // authenticated session read.
   const displayAmount =
-    typeof outcome.amount === "number" ? (outcome.amount / 100).toFixed(2) : "—";
+    typeof outcome.amount === "number" && typeof outcome.currency === "string"
+      ? formatMinorAmount(outcome.amount, outcome.currency)
+      : "—";
 
   // ⚠️ Displaying a confirmation is safe to repeat. FULFILLING is not — this URL
   // can be replayed, and the status keeps reading "succeeded" every time. Record
@@ -108,9 +111,7 @@ export default async function ConfirmPage({
       <h1>Payment successful</h1>
       <p>Session: {outcome.sessionId}</p>
       <p>Status: {outcome.status}</p>
-      <p>
-        Amount: {displayAmount} {outcome.currency ?? ""}
-      </p>
+      <p>Amount: {displayAmount}</p>
       <p>Transaction: {outcome.transactionId ?? "N/A"}</p>
       <p>
         <a href="/links">← Back to dashboard</a>

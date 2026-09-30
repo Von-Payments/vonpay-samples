@@ -22,7 +22,7 @@ only have access to this repo, open an issue.
   schedule, not here — this repo carries no leak/drift rule files on purpose.
 - Renovate is disabled here (`renovate.json`): bumps land upstream.
 
-## Supabase projects
+## Database projects
 
 N/A. This repo has no database, no migrations and no replication; the DB-parity and replication-wiring checks do not run here.
 

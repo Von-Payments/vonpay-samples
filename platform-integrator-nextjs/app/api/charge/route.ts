@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { VonPayCheckout } from "@vonpay/checkout-node";
 import { getTenant, getTenantCredentials } from "@/lib/tenants";
+import { getCustomer } from "@/lib/customers";
 
 // The shape the tenant page mints: `ord_` + a random (v4) UUID. Anything else
 // is refused rather than used as a key, so a missing or free-form value can
@@ -16,11 +17,21 @@ const ORDER_ID_PATTERN =
  *   orderId        — the order this charge is for, minted once when the
  *                    form was rendered (`ord_<uuid>`); keys idempotency
  *   customerId     — your CRM's customer ID (becomes buyerId in Von Payments)
- *   customerEmail  — buyer email (becomes buyerEmail)
- *   amountCents    — charge amount in minor units
+ *
+ * ⛔ The form does NOT post an amount, and this route reads none. Everything a
+ * browser sends can be edited — a hidden field is one right-click away — so a
+ * price taken from the form lets anyone pay $0.01 for a $1,499 invoice. The
+ * amount, currency and buyer email come from the customer record on the SERVER
+ * (`getCustomer`). The browser cannot influence the amount at all; it only
+ * picks which customer.
+ *
+ * ⚠️ Auth: intentionally unauthenticated for local-dev convenience. Gate this
+ * route behind your platform's own sign-in before deploying — as written,
+ * anyone who can reach it can start a checkout on any tenant's API key. Also
+ * check that the signed-in user is allowed to act for `tenantId`.
  *
  * The handler:
- *   1. Resolves the tenant and looks up their vp_sk credential
+ *   1. Resolves the tenant and the customer, and looks up the tenant's vp_sk
  *   2. Builds a tenant-scoped successUrl
  *   3. Calls vonpay.sessions.create() with an Idempotency-Key
  *   4. 303-redirects to the returned checkoutUrl
@@ -30,15 +41,17 @@ export async function POST(req: NextRequest) {
   const tenantId = String(formData.get("tenantId") ?? "");
   const orderId = String(formData.get("orderId") ?? "");
   const customerId = String(formData.get("customerId") ?? "");
-  const customerEmail = String(formData.get("customerEmail") ?? "");
-  const amountCents = Number.parseInt(String(formData.get("amountCents") ?? "0"), 10);
 
   const tenant = getTenant(tenantId);
   if (!tenant) {
     return NextResponse.json({ error: "unknown_tenant" }, { status: 400 });
   }
-  if (!Number.isFinite(amountCents) || amountCents <= 0) {
-    return NextResponse.json({ error: "invalid_amount" }, { status: 400 });
+  // Price, currency and email come from YOUR record, looked up on the server —
+  // never from the form. Keyed on the tenant too, so a customer id belonging to
+  // one tenant cannot be charged under another.
+  const customer = getCustomer(tenant.id, customerId);
+  if (!customer) {
+    return NextResponse.json({ error: "unknown_customer" }, { status: 400 });
   }
   if (!ORDER_ID_PATTERN.test(orderId)) {
     return NextResponse.json({ error: "invalid_order_id" }, { status: 400 });
@@ -74,17 +87,17 @@ export async function POST(req: NextRequest) {
   try {
     const session = await vonpay.sessions.create(
       {
-        amount: amountCents,
-        currency: "USD",
+        amount: customer.chargeAmount,
+        currency: customer.currency,
         successUrl: `${baseUrl}/tenants/${tenantId}/confirm`,
         cancelUrl: `${baseUrl}/tenants/${tenantId}`,
-        buyerId: customerId,
-        buyerEmail: customerEmail,
+        buyerId: customer.id,
+        buyerEmail: customer.email,
         lineItems: [
           {
             name: "Acme CRM charge",
             quantity: 1,
-            unitAmount: amountCents,
+            unitAmount: customer.chargeAmount,
           },
         ],
       },

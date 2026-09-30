@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { VonPayCheckout } from "@vonpay/checkout-node";
 import { getTenant, getTenantCredentials } from "@/lib/tenants";
+import { formatMinorAmount } from "@/lib/money";
 
 interface Props {
   params: Promise<{ merchantId: string }>;
@@ -106,8 +107,10 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
   // can complete a real 1-unit payment and then edit the URL to show a
   // confirmation for any figure they like. `outcome.amount` came back from the
   // authenticated session read.
-  const minor = typeof outcome.amount === "number" ? outcome.amount : NaN;
-  const dollarAmount = Number.isFinite(minor) ? `$${(minor / 100).toFixed(2)}` : "—";
+  const displayAmount =
+    typeof outcome.amount === "number" && typeof outcome.currency === "string"
+      ? formatMinorAmount(outcome.amount, outcome.currency)
+      : "—";
 
   return (
     <>
@@ -129,7 +132,7 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
           <tbody>
             <Row label="Session" value={sessionId} />
             <Row label="Transaction" value={txId || "—"} />
-            <Row label="Amount" value={`${dollarAmount} ${outcome.currency ?? ""}`} />
+            <Row label="Amount" value={displayAmount} />
           </tbody>
         </table>
       </div>

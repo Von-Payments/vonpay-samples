@@ -5,6 +5,24 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+/**
+ * Format an amount in MINOR units (what the API sends) for display.
+ * Not every currency has 2 decimals (JPY has 0, KWD has 3), so dividing by 100
+ * shows the wrong figure for those — ask the currency data instead.
+ */
+function formatMinorAmount(amount: number, currency: string): string {
+  const code = currency.toUpperCase();
+  let formatter: Intl.NumberFormat;
+  try {
+    formatter = new Intl.NumberFormat("en", { style: "currency", currency: code });
+  } catch {
+    // Not a well-formed currency code (Intl throws). Show the raw minor units rather than guess.
+    return `${amount} ${code} (minor units)`;
+  }
+  const exponent = formatter.resolvedOptions().maximumFractionDigits ?? 2;
+  return formatter.format(amount / 10 ** exponent);
+}
+
 const app = express();
 const port = parseInt(process.env.PORT ?? "3000", 10);
 
@@ -175,7 +193,9 @@ app.get("/success", async (req, res) => {
   // confirmation for any figure they like. `outcome.amount` came back from the
   // authenticated session read.
   const displayAmount =
-    typeof outcome.amount === "number" ? (outcome.amount / 100).toFixed(2) : "—";
+    typeof outcome.amount === "number" && typeof outcome.currency === "string"
+      ? formatMinorAmount(outcome.amount, outcome.currency)
+      : "—";
 
   // ⚠️ Displaying a confirmation is safe to repeat. FULFILLING is not — this
   // URL can be replayed, and the status keeps reading "succeeded" every time.
@@ -185,7 +205,7 @@ app.get("/success", async (req, res) => {
     <h1>Payment successful</h1>
     <p>Session: ${esc(params.session)}</p>
     <p>Status: ${esc(outcome.status ?? "")}</p>
-    <p>Amount: ${esc(displayAmount)} ${esc(outcome.currency ?? "")}</p>
+    <p>Amount: ${esc(displayAmount)}</p>
     <p>Transaction: ${esc(outcome.transactionId ?? "N/A")}</p>
   `);
 });

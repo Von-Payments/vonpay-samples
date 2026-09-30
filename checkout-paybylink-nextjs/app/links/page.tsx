@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { formatMinorAmount, toMinorAmount } from "@/lib/money";
 
 interface PayLink {
   id: string;
@@ -34,9 +35,10 @@ export default function LinksDashboard() {
     setSubmitting(true);
     setError(null);
 
-    const minorUnits = Math.round(Number.parseFloat(amount) * 100);
-    if (!Number.isFinite(minorUnits) || minorUnits <= 0) {
-      setError("Amount must be a positive number");
+    // Minor units depend on the currency: 25 JPY is 25, 25.00 USD is 2500.
+    const minorUnits = toMinorAmount(amount, currency);
+    if (minorUnits === null || minorUnits <= 0) {
+      setError(`Amount must be a positive ${currency} amount with the right number of decimals`);
       setSubmitting(false);
       return;
     }
@@ -122,9 +124,7 @@ export default function LinksDashboard() {
             {links.map((link) => (
               <tr key={link.id}>
                 <td style={cell}>{link.description}</td>
-                <td style={cell}>
-                  {(link.amount / 100).toFixed(2)} {link.currency}
-                </td>
+                <td style={cell}>{formatMinorAmount(link.amount, link.currency)}</td>
                 <td style={cell}>
                   <StatusBadge status={link.status} />
                 </td>

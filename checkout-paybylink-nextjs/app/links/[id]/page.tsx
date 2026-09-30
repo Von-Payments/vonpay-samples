@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
 import { getLink } from "@/lib/storage";
+import { formatMinorAmount } from "@/lib/money";
 import LinkStatusPoller from "./status-poller";
 
 export default async function LinkDetailPage({
@@ -25,9 +26,7 @@ export default async function LinkDetailPage({
       </p>
       <h1>{link.description}</h1>
       <p style={{ fontSize: 18 }}>
-        <strong>
-          {(link.amount / 100).toFixed(2)} {link.currency}
-        </strong>
+        <strong>{formatMinorAmount(link.amount, link.currency)}</strong>
       </p>
 
       <section style={{ margin: "1.5rem 0" }}>
