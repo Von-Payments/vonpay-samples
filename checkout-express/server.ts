@@ -6,6 +6,17 @@ function esc(s: string): string {
 }
 
 /**
+ * True when this runtime recognises `code` as a real currency. `Intl` does NOT
+ * throw on a well-formed but unknown code (e.g. "XYZ"): it quietly assumes 2
+ * decimals, which would show a confident wrong amount. So check the runtime's
+ * own currency list first, and when a runtime has no such list, trust Intl.
+ */
+function isKnownCurrency(code: string): boolean {
+  const supportedValuesOf = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
+  return typeof supportedValuesOf !== "function" || supportedValuesOf("currency").includes(code);
+}
+
+/**
  * Format an amount in MINOR units (what the API sends) for display.
  * Not every currency has 2 decimals (JPY has 0, KWD has 3), so dividing by 100
  * shows the wrong figure for those — ask the currency data instead.
@@ -14,9 +25,10 @@ function formatMinorAmount(amount: number, currency: string): string {
   const code = currency.toUpperCase();
   let formatter: Intl.NumberFormat;
   try {
+    if (!isKnownCurrency(code)) throw new RangeError(`unknown currency ${code}`);
     formatter = new Intl.NumberFormat("en", { style: "currency", currency: code });
   } catch {
-    // Not a well-formed currency code (Intl throws). Show the raw minor units rather than guess.
+    // Malformed (Intl throws) or not a currency this runtime knows. Show the raw minor units rather than guess.
     return `${amount} ${code} (minor units)`;
   }
   const exponent = formatter.resolvedOptions().maximumFractionDigits ?? 2;
