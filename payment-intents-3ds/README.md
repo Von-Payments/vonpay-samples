@@ -39,7 +39,9 @@ Test payments run on a sandbox account backed by a payment provider's test envir
 
 ### 2. A saved card to charge
 
-This server-only sample charges a card that is already saved (`vp_pmt_test_…`). Nothing is made up for you in test mode: save a real card on your sandbox with `tokens.create` (see the [saved-cards-mit](../saved-cards-mit) sample), using a test card your payment provider's test environment challenges for 3-D Secure. Set its token as `VON_PAY_PAYMENT_METHOD`, or send it as `paymentMethod` on each `/charge`. Without either, `/charge` answers `400` and charges nothing.
+This server-only sample charges a card that is already saved (`vp_pmt_test_…`). Nothing is made up for you in test mode: save a real card on your sandbox with `tokens.create` (see the [saved-cards-mit](../saved-cards-mit) sample), using a test card your payment provider's test environment challenges for 3-D Secure. Set its token as `VON_PAY_PAYMENT_METHOD` and the buyer you saved it for as `VON_PAY_BUYER_ID`. Without a card, `/charge` answers `400` and charges nothing.
+
+The card is never read from the request. Card ids are not secrets (they show up in logs, support tickets and your own saved-card screens), so a route that charges whatever card id it is sent lets anyone charge anyone's saved card. In a real app, look up the signed-in customer's card on your server and send `buyerId` with the charge: the API refuses a card that was saved for a different buyer.
 
 ### 3. Configure + run
 
@@ -54,9 +56,7 @@ npm run dev
 Open `http://localhost:3000` and click **Pay**, or drive it from curl:
 
 ```bash
-curl -i -X POST http://localhost:3000/charge \
-  -H "Content-Type: application/json" \
-  -d '{ "paymentMethod": "vp_pmt_test_..." }'
+curl -i -X POST http://localhost:3000/charge
 ```
 
 When the bank challenges, `/charge` responds `303` with a `Location` header pointing at the challenge URL - that's the redirect your buyer's browser follows.
@@ -98,7 +98,8 @@ Expose your local server (e.g. `cloudflared tunnel --url http://localhost:3000` 
 |---|---|---|
 | `VON_PAY_SECRET_KEY` | yes | - |
 | `VON_PAY_WEBHOOK_SECRET` | yes | - |
-| `VON_PAY_PAYMENT_METHOD` | unless each `/charge` sends `paymentMethod` | - |
+| `VON_PAY_PAYMENT_METHOD` | yes, to charge | - |
+| `VON_PAY_BUYER_ID` | recommended (sent as `buyerId`) | - |
 | `VON_PAY_BASE_URL` | no | `https://checkout.vonpay.com` |
 | `VON_PAY_RETURN_URL` | no | `http://localhost:{PORT}/3ds/return` |
 | `PORT` | no | `3000` |

@@ -10,7 +10,7 @@
  * `payment_intent.failed` webhook — never by the buyer's browser.
  *
  * Flow demonstrated:
- *   POST /charge       Create a manual-capture intent with a vp_pmt_* token.
+ *   POST /charge       Create a manual-capture intent against the saved card.
  *                      Branch on status:
  *                        requires_action → redirect the buyer to the 3DS URL
  *                        authorized      → no challenge; capture immediately
@@ -69,10 +69,11 @@ const returnUrl =
 
 const vonpay = new VonPayCheckout({ apiKey, baseUrl });
 
-// Optional default saved card (`vp_pmt_test_*` on a test key) for the Pay
-// button, so the demo runs without a front-end card form. A `paymentMethod` in
-// the POST /charge body overrides it.
-const defaultPaymentMethodId = process.env.VON_PAY_PAYMENT_METHOD?.trim() || undefined;
+// The saved card to charge (`vp_pmt_test_*` on a test key) and the buyer it
+// was saved for. In a real app both come from YOUR records for the signed-in
+// customer, never from the request.
+const savedPaymentMethodId = process.env.VON_PAY_PAYMENT_METHOD?.trim() || undefined;
+const savedCardBuyerId = process.env.VON_PAY_BUYER_ID?.trim() || undefined;
 
 // ─── Reading the 3DS redirect off the intent ──────────────────────────────
 //
@@ -126,27 +127,28 @@ app.use("/webhooks", express.raw({ type: "application/json", limit: "1mb" }));
 app.use(express.json());
 
 // ─── Create + 3DS branch ─────────────────────────────────────────────────
-// POST /charge  { paymentMethod?: string, amount?: number }
+// POST /charge  (no body — the server decides what is charged, and to which card)
+//
+// ⛔ The card is NOT read from the request. This route used to accept
+// `{ paymentMethod: "vp_pmt_..." }` in the body, which let anyone who had seen
+// another buyer's saved-card id (a support paste, a log, their own devtools)
+// charge that card through your server. Card ids are not secrets. Look the card
+// up server-side for the signed-in customer, exactly as the amount below is
+// fixed server-side, and send `buyerId` so the API refuses a card saved for
+// someone else.
 //
 // We use capture_method: "manual" so a 3DS success lands on `authorized`
 // (auth held, not captured) and we capture explicitly. With
 // capture_method: "automatic" the same flow collapses straight to `succeeded`.
 app.post("/charge", async (req: Request, res: Response): Promise<void> => {
-  const body = (req.body ?? {}) as { paymentMethod?: unknown; amount?: unknown };
-
-  // In a real app this token comes from POST /v1/tokens (or VORA Mirror's
-  // tokenize/submit) on the front end. There is no made-up test token: in test
-  // mode a `vp_pmt_test_*` token is a real card saved on your sandbox account's
-  // payment provider test environment, and whether the bank challenges is up to
-  // that environment — use a card your provider's test environment challenges.
-  const paymentMethodId =
-    typeof body.paymentMethod === "string" && body.paymentMethod.length > 0
-      ? body.paymentMethod
-      : defaultPaymentMethodId;
+  // There is no made-up test token: in test mode a `vp_pmt_test_*` token is a
+  // real card saved on your sandbox account's payment provider test
+  // environment, and whether the bank challenges is up to that environment —
+  // use a card your provider's test environment challenges.
+  const paymentMethodId = savedPaymentMethodId;
   if (!paymentMethodId) {
     res.status(400).json({
-      error:
-        "No saved card to charge. Send { paymentMethod: \"vp_pmt_...\" } or set VON_PAY_PAYMENT_METHOD.",
+      error: "No saved card to charge. Set VON_PAY_PAYMENT_METHOD (and VON_PAY_BUYER_ID).",
     });
     return;
   }
@@ -158,6 +160,11 @@ app.post("/charge", async (req: Request, res: Response): Promise<void> => {
     currency: CURRENCY,
     captureMethod: "manual",
     paymentMethod: { id: paymentMethodId },
+    // ⛔ Send the buyer the card was saved for on every saved-card charge. The
+    // API returns 404 payment_method_not_found when it does not match, which is
+    // what stops a stored card being billed to the wrong customer. It only
+    // protects you when you send it (see the saved-cards-mit sample).
+    ...(savedCardBuyerId ? { buyerId: savedCardBuyerId } : {}),
     returnUrl,
     metadata: { order_id: orderId, sample: "payment-intents-3ds" },
   };
