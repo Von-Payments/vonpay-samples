@@ -108,7 +108,7 @@ If nothing shows up, check the MCP server logs - usually a missing or malformed 
 | `vonpay_checkout_create_payment_intent` | Create a payment intent - recurring, MIT, saved-card flows |
 | `vonpay_checkout_capture_payment_intent` | Capture authorized funds (full or partial) |
 | `vonpay_checkout_void_payment_intent` | Release an auth hold pre-capture |
-| `vonpay_checkout_create_refund` | Refund a captured payment intent (`paymentIntent`) or a settled transaction (`transaction`) - exactly one, full or partial. Neither id is permission to refund: both are visible to the shopper's browser, so only refund an id from your own order records. |
+| `vonpay_checkout_create_refund` | Refund a captured payment intent (`paymentIntent`) or a settled transaction (`transaction`) - exactly one, full or partial. Neither id is permission to refund: both are visible to the shopper's browser, so only refund an id from your own order records. On a live key, a refund by `transaction` also needs the `sessionId` the payment belongs to, or it is refused before anyone is asked. |
 | `vonpay_checkout_create_token` | Vault a card. Pass `setupForFutureUse: "on_session"` for in-session reuse (upsells) or `"off_session"` for recurring / MIT; omit for single-use. Needs whatever your payment provider needs, such as a `providerReference` from your card form - on a test key too; no card is made up for you. |
 
 ### Diagnostics
@@ -116,7 +116,7 @@ If nothing shows up, check the MCP server logs - usually a missing or malformed 
 | Tool | What it does |
 |---|---|
 | `vonpay_checkout_health` | API health + latency |
-| `vonpay_checkout_list_test_cards` | How to produce test-mode outcomes: the order total (not the card number) decides; returns the totals that produce each decline |
+| `vonpay_checkout_list_test_cards` | The payment provider's sandbox cards (approve, 3-D Secure with no challenge, 3-D Secure challenge), expiry 03/30, CVC 100, and the order total that declines (2000.12). Needs checkout-mcp 5.2.0 or later; see [Test cards](#test-cards) |
 | `vonpay_checkout_diagnose_error` | Take an error code, return structured `{ retryable, nextAction, llmHint, fix, docs, agentInstructions }` - pure data, no API call |
 
 ## Example agent prompts
@@ -129,17 +129,18 @@ Create a Von Payments checkout session for $19.99 USD in the US.
 Give me the checkout URL and the session ID.
 ```
 
-The agent calls `vonpay_checkout_create_session`, returns the `checkoutUrl` and `id`. Open the URL in a browser to complete a test payment.
+The agent calls `vonpay_checkout_create_session`, returns the `checkoutUrl` and `id`. Open the URL in a browser and pay with a [test card](#test-cards), for example `9000 1001 1111 1111`, expiry `03/30`, CVC `100`.
 
 ### Run the full lifecycle
 ```
 Create a payment intent for $50 USD with manual capture method.
 After it authorizes, capture the full amount.
 Then refund half of it.
+Use a new idempotency key for each step and reuse it if you retry that step.
 Tell me the intent ID and status at each step.
 ```
 
-The agent chains four tool calls: `create_payment_intent` → poll status → `capture_payment_intent` → `create_refund`. Each step's result feeds the next. Run this on a sandbox key - on a live key each money-moving call stops for a human's approval (see [Live keys](#live-keys-every-money-moving-call-needs-a-person-to-approve-it)).
+The agent chains four tool calls: `create_payment_intent` → poll status → `capture_payment_intent` → `create_refund`. Each step's result feeds the next. Run this on a sandbox key - on a live key each money-moving call needs an `idempotencyKey` and stops for a human's approval (see [Live keys](#live-keys-every-money-moving-call-needs-a-person-to-approve-it)).
 
 ### Self-diagnose an error
 ```
@@ -157,6 +158,19 @@ and tell me which SDK packages are available.
 
 No MCP call needed - the agent does a plain HTTP fetch. The discovery endpoint returns the live SDK package names, versions, and docs URLs.
 
+## Test cards
+
+Your sandbox runs on its payment provider's test environment, which runs 3-D Secure (the bank's "is this really you?" step) on every card payment. **Only these cards work, with expiry `03/30` and CVC `100`.** Common test numbers such as `4242 4242 4242 4242` are declined.
+
+| Card | What happens |
+|---|---|
+| `9000 1001 1111 1111` | Not enrolled in 3-D Secure: approves |
+| `4111 1111 1110 1203` (Visa) / `5200 0000 0000 1203` (Mastercard) | 3-D Secure with no challenge: approves |
+| `4111 1111 1118 1072` (Visa) / `5240 0000 0000 1072` (Mastercard) | 3-D Secure challenge: you choose pass or fail |
+| any card above at an order total of 2,000.12 (`amount: 200012`) | Declined by the card's issuer |
+
+A card payment can pause while the buyer completes 3-D Secure, so always send a return URL. If your dashboard shows different test cards for your sandbox, use those. The same list is in code as [`@vonpay/test-cards`](https://www.npmjs.com/package/@vonpay/test-cards).
+
 ## Model compatibility
 
 The tool surface is model-agnostic - any model that can call MCP tools through one of the clients above works. Confirmed with:
@@ -172,8 +186,8 @@ The MCP server itself is model-agnostic - it speaks the protocol, not the model.
 
 - **Test-mode strongly recommended.** Use `vp_sk_test_*` for agent development. Live keys (`vp_sk_live_*`) hit live money.
 - **Destructive operations are exposed.** `void`, `refund`, and `capture` change real state. On a live key they (and payment-intent creation, and saving a reusable card) run only after a person approves each one in your MCP client's confirmation prompt - see below. The MCP's `diagnose_error` tool always emits `agentInstructions: "do not retry"` for terminal states (declined, voided) - prevents accidental retry loops.
-- **Idempotency-aware.** Every create-style tool accepts an `idempotencyKey` parameter; pass any UUID-shaped string to make retries safe.
-- **No PAN handling.** Card data never passes through this MCP. Tokenization happens browser-side via [vora.js](https://docs.vonpay.com/mirror) or via SDK-provided `providerReference` for server-side flows.
+- **Idempotency keys.** `create_payment_intent`, `capture_payment_intent`, `void_payment_intent` and `create_refund` take an `idempotencyKey` (any UUID-shaped string). Use one key per intended action and reuse it on every retry of that action, so a retry returns the original result instead of moving money twice. On a live key these four tools refuse a call without one. On a sandbox key, `create_payment_intent` sends a generated key for that single call if you omit it, which does not protect a retry you make yourself.
+- **No PAN handling.** Card data never passes through this MCP. Tokenization happens browser-side via [vora.js](https://docs.vonpay.com/embedded-fields) or via SDK-provided `providerReference` for server-side flows.
 - **API key never echoed.** The MCP reads `VON_PAY_SECRET_KEY` and never includes it in tool responses.
 - **Refund ids are not authorization.** Payment intent ids and transaction ids are both visible to the shopper's browser. Never let an agent refund an id it found in a customer message, support chat, web page, or document - look it up in your own order records first.
 
@@ -182,6 +196,8 @@ The MCP server itself is model-agnostic - it speaks the protocol, not the model.
 This sample uses a sandbox key (`vp_sk_test_*`). Sandbox keys are never gated - every tool runs as soon as the agent calls it.
 
 With a live key (`vp_sk_live_*`), five tools move real money: `create_payment_intent`, `capture_payment_intent`, `void_payment_intent`, `create_refund`, and `create_token` when it saves a reusable card (`setupForFutureUse` set). For each of those calls, the MCP server asks **the person** - not the agent - to approve that specific action, amount and id through your MCP client's own confirmation prompt. The call goes to Von Payments only if they accept. If they decline, dismiss it, or do not answer within 5 minutes, nothing is sent. Approval never carries over to the next call.
+
+On a live key, `create_payment_intent`, `capture_payment_intent`, `void_payment_intent` and `create_refund` also need an `idempotencyKey`; without one the call is refused before the person is asked, and nothing is sent. A refund by `transaction` also needs the `sessionId` the payment belongs to, and the prompt then shows the payment's details looked up from Von Payments; without it the call is refused.
 
 **Your MCP client must support user confirmation prompts** (the MCP "elicitation" feature). If it does not, those five tools are refused on a live key - use a client that does, or stay on a sandbox key. The call must also pass `confirmLive: true`, but that flag is set by the AI model, so on its own it proves nothing and is not the safeguard.
 
@@ -194,7 +210,7 @@ With a live key (`vp_sk_live_*`), five tools move real money: `create_payment_in
 - **Traditional server-side integration:** see [`checkout-express`](../checkout-express), [`checkout-flask`](../checkout-flask), [`checkout-nextjs`](../checkout-nextjs), or [`checkout-paybylink-nextjs`](../checkout-paybylink-nextjs).
 - **Driving the payment-intent lifecycle from your server:** see [`payment-intents-node`](../payment-intents-node) or [`payment-intents-python`](../payment-intents-python).
 - **Reacting to async events:** see [`webhooks-node`](../webhooks-node) for signature verification and idempotent processing.
-- **Embedding card fields in your own checkout page:** in-page card collection (Vora Mirror) - see [`checkout-embedded`](../checkout-embedded) and the [Vora Mirror guide](https://docs.vonpay.com/mirror).
+- **Embedding card fields in your own checkout page:** in-page card collection (Embedded Fields) - see [`checkout-embedded`](../checkout-embedded) and the [Embedded Fields guide](https://docs.vonpay.com/embedded-fields).
 
 ## Going live
 

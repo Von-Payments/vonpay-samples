@@ -3,7 +3,7 @@
 Minimal end-to-end reference integration on Flask 3: create a session, redirect the buyer to `checkout.vonpay.com`, confirm the outcome server-side on `/success`, and verify HMAC webhooks on `/webhooks`. Python equivalent of the Express and Next.js samples.
 
 - **Stack:** Flask 3+, Python 3.9+
-- **Von Payments SDK:** [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) 2.x - 2.11 or later (`>=2.11,<3`)
+- **Von Payments SDK:** [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) 3.x - 3.4 or later (`>=3.4,<4`)
 - **What it demonstrates:** session creation with an idempotency key, server-side return confirmation, HMAC webhook verification with raw-body parsing
 
 ## 5-minute setup
@@ -56,7 +56,7 @@ The `sessions.create()` call sends an idempotency key derived from the order id 
 
 Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header - there is no separate timestamp header). `checkout.webhooks.construct_event(raw_body, signature_header, webhook_secret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent`. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) - not your API key.
 
-**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `True` the handler returns 2xx and does nothing else (the field exists from SDK 2.7, hence `>=2.7,<3`).
+**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `True` the handler returns 2xx and does nothing else (the field exists from SDK 2.7; this sample's `>=3.4,<4` covers it).
 
 The webhook handler branches on `event.type`. `charge.succeeded` means the buyer actually paid - do **not** fulfill on `charge.failed`. Unknown event types are acked (200) with no action. ⚠️ Do **not** subscribe to `session.succeeded`: the server emits it internally but it is not in the merchant subscription catalog, which silently drops unknown keys and returns success - an endpoint subscribed to it receives nothing, forever.
 

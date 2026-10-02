@@ -1,15 +1,15 @@
-# Von Payments Checkout - Embedded (VORA Mirror) sample
+# Von Payments Checkout - Embedded Fields sample
 
 Embedded card collection: the buyer stays on **your** domain and the card
-field is rendered inside a Von Payments-owned iframe (VORA Mirror). Card
+field is rendered inside a Von Payments-owned iframe (Embedded Fields). Card
 data never touches your server or your DOM, so you stay out of PCI scope -
 without sending the buyer to a hosted checkout page.
 
 - **Stack:** Node 20+ / Express 5 / TypeScript (server, run via `tsx`) +
   a static HTML/JS page (browser)
 - **Von Payments SDKs:**
-  - Server: `@vonpay/checkout-node` 2.x - 2.11.0 or later (`^2.11.0`)
-  - Browser: the VORA Mirror SDK, loaded from
+  - Server: `@vonpay/checkout-node` 3.x - 3.4.0 or later (`^3.4.0`)
+  - Browser: the Embedded Fields SDK, loaded from
     `https://js.vonpay.com/v1/vora.js` (CDN `<script>` - there is no public
     npm package to install)
 - **What it demonstrates:** create a session server-side, mount the card
@@ -88,15 +88,24 @@ click **Pay**.
 
 ### 3. Test cards and outcomes
 
-A test key never moves real money. Enter any test card your sandbox's payment
-provider test environment accepts (your dashboard shows them for your sandbox).
+A test key never moves real money. Your sandbox runs on its payment provider's
+test environment, which runs 3-D Secure on every card payment, so **only these
+cards work, with expiry `03/30` and CVC `100`**. Common test numbers such as
+`4242 4242 4242 4242` are declined.
 
-The **order total** decides the outcome, not the card number: a card number
-never produces a decline, and an ordinary total like this sample's 49.99
-approves. To test a decline, change `AMOUNT` in `server.ts` to one of the
-totals listed in
-[docs.vonpay.com/reference/test-cards](https://docs.vonpay.com/reference/test-cards)
-(for example `200011`, i.e. 2,000.11, declines with `insufficient_funds`).
+| Card | What happens |
+|---|---|
+| `9000 1001 1111 1111` | Not enrolled in 3-D Secure: approves |
+| `4111 1111 1110 1203` (Visa) / `5200 0000 0000 1203` (Mastercard) | 3-D Secure with no challenge: approves |
+| `4111 1111 1118 1072` (Visa) / `5240 0000 0000 1072` (Mastercard) | 3-D Secure challenge: you choose pass or fail |
+| any card above at an order total of 2,000.12 (`200012`) | Declined by the card's issuer |
+
+The **order total** decides a decline, not the card: this sample's 49.99
+approves. To test a decline, change `AMOUNT` in `server.ts` to `200012`
+(2,000.12). A card payment can pause while the buyer completes 3-D Secure, so
+always send a return URL. If your dashboard shows different test cards for
+your sandbox, use those. More in
+[docs.vonpay.com/reference/test-cards](https://docs.vonpay.com/reference/test-cards).
 
 ## Pinning the SDK version
 
@@ -146,9 +155,9 @@ one. Replace the stand-in order id with your own order record's id.
 
 ## Related
 
-- [VORA Mirror quickstart](https://docs.vonpay.com/mirror/quickstart)
-- [Charge-and-save flow](https://docs.vonpay.com/mirror/charge-and-save)
-- [Tokenization model](https://docs.vonpay.com/mirror/tokenization)
+- [Embedded Fields quickstart](https://docs.vonpay.com/embedded-fields/quickstart)
+- [Charge-and-save flow](https://docs.vonpay.com/embedded-fields/tokenization#charge-and-save)
+- [Tokenization model](https://docs.vonpay.com/embedded-fields/tokenization)
 - [Payment Intents reference](https://docs.vonpay.com/integration/payment-intents)
 - [Webhooks](https://docs.vonpay.com/integration/webhooks)
 - `checkout-express` - hosted-redirect equivalent (no embedded fields)

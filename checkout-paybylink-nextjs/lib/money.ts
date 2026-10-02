@@ -1,31 +1,55 @@
-/**
- * True when this runtime recognises `code` as a real currency. `Intl` does NOT
- * throw on a well-formed but unknown code (e.g. "XYZ"): it quietly assumes 2
- * decimals, which would show a confident wrong amount. So check the runtime's
- * own currency list first, and when a runtime has no such list, trust Intl.
- */
-function isKnownCurrency(code: string): boolean {
-  const supportedValuesOf = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
-  return typeof supportedValuesOf !== "function" || supportedValuesOf("currency").includes(code);
-}
+// ── Currency decimals ────────────────────────────────────────────────
+// The SAME table as `minorUnitDigits` in @vonpay/checkout-node (the API's own
+// decimals). It is copied here because this code also runs in the browser,
+// where the server SDK cannot be imported. Keep it identical to the SDK's.
+//
+// Real currency codes: active ISO 4217 codes that have a minor unit.
+const CURRENCY_CODES: ReadonlySet<string> = new Set([
+  "AED", "AFN", "ALL", "AMD", "AOA", "ARS", "AUD", "AWG", "AZN", "BAM", "BBD",
+  "BDT", "BHD", "BIF", "BMD", "BND", "BOB", "BOV", "BRL", "BSD", "BTN", "BWP",
+  "BYN", "BZD", "CAD", "CDF", "CHE", "CHF", "CHW", "CLF", "CLP", "CNY", "COP",
+  "COU", "CRC", "CUP", "CVE", "CZK", "DJF", "DKK", "DOP", "DZD", "EGP", "ERN",
+  "ETB", "EUR", "FJD", "FKP", "GBP", "GEL", "GHS", "GIP", "GMD", "GNF", "GTQ",
+  "GYD", "HKD", "HNL", "HTG", "HUF", "IDR", "ILS", "INR", "IQD", "IRR", "ISK",
+  "JMD", "JOD", "JPY", "KES", "KGS", "KHR", "KMF", "KPW", "KRW", "KWD", "KYD",
+  "KZT", "LAK", "LBP", "LKR", "LRD", "LSL", "LYD", "MAD", "MDL", "MGA", "MKD",
+  "MMK", "MNT", "MOP", "MRU", "MUR", "MVR", "MWK", "MXN", "MXV", "MYR", "MZN",
+  "NAD", "NGN", "NIO", "NOK", "NPR", "NZD", "OMR", "PAB", "PEN", "PGK", "PHP",
+  "PKR", "PLN", "PYG", "QAR", "RON", "RSD", "RUB", "RWF", "SAR", "SBD", "SCR",
+  "SDG", "SEK", "SGD", "SHP", "SLE", "SOS", "SRD", "SSP", "STN", "SVC", "SYP",
+  "SZL", "THB", "TJS", "TMT", "TND", "TOP", "TRY", "TTD", "TWD", "TZS", "UAH",
+  "UGX", "USD", "USN", "UYI", "UYU", "UYW", "UZS", "VED", "VES", "VND", "VUV",
+  "WST", "XAD", "XAF", "XCD", "XCG", "XOF", "XPF", "YER", "ZAR", "ZMW", "ZWG",
+]);
+// Codes whose decimals are not settled yet (the API's table and ISO 4217
+// disagree, and Von Payments is confirming which one the payment processor
+// applies). Never guess money: these are treated as unknown.
+const DISPUTED: ReadonlySet<string> = new Set([
+  "CLF", "IQD", "ISK", "LYD", "MGA", "UYI", "UYW",
+]);
+// The API's 0- and 3-decimal currencies; every other code is 2.
+const ZERO_DECIMAL: ReadonlySet<string> = new Set([
+  "BIF", "CLP", "DJF", "GNF", "JPY", "KMF", "KRW", "MGA", "PYG", "RWF",
+  "UGX", "VND", "VUV", "XAF", "XOF", "XPF",
+]);
+const THREE_DECIMAL: ReadonlySet<string> = new Set([
+  "BHD", "JOD", "KWD", "OMR", "TND",
+]);
 
 /**
- * Amounts in the Von Payments API are in MINOR units (e.g. cents).
- *
- * Not every currency has 2 decimals (JPY has 0, KWD has 3), so multiplying or
- * dividing by 100 is wrong for those. Ask the currency data how many decimals
- * the currency uses instead of assuming. Returns null for a malformed currency
- * code (Intl throws on those) and for one this runtime does not recognise.
+ * How many decimals the Von Payments API uses for `currency` (2 for USD, 0 for
+ * JPY, 3 for KWD), or null for a code that is not a real currency or whose
+ * decimals are not settled (DISPUTED). Runtime Intl data is NOT used: it
+ * disagrees with the API for some currencies (HUF, COP, …), and a confident
+ * wrong answer here mis-states a charge.
  */
 function currencyDecimals(currency: string): number | null {
-  try {
-    const code = currency.toUpperCase();
-    if (!isKnownCurrency(code)) return null;
-    const formatter = new Intl.NumberFormat("en", { style: "currency", currency: code });
-    return formatter.resolvedOptions().maximumFractionDigits ?? 2;
-  } catch {
-    return null;
-  }
+  const code = currency.toUpperCase();
+  if (!CURRENCY_CODES.has(code)) return null;
+  if (DISPUTED.has(code)) return null;
+  if (ZERO_DECIMAL.has(code)) return 0;
+  if (THREE_DECIMAL.has(code)) return 3;
+  return 2;
 }
 
 /** Format an amount in minor units for display, e.g. (2500, "USD") → "$25.00". */
@@ -36,9 +60,12 @@ export function formatMinorAmount(amount: number, currency: string): string {
     // Malformed or unrecognised currency code. Show the raw minor units rather than guess.
     return `${amount} ${code} (minor units)`;
   }
-  return new Intl.NumberFormat("en", { style: "currency", currency: code }).format(
-    amount / 10 ** exponent,
-  );
+  return new Intl.NumberFormat("en", {
+    style: "currency",
+    currency: code,
+    minimumFractionDigits: exponent,
+    maximumFractionDigits: exponent,
+  }).format(amount / 10 ** exponent);
 }
 
 /**

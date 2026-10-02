@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Von Payments — Embedded checkout (VORA Mirror)</title>
+    <title>Von Payments — Embedded checkout (Embedded Fields)</title>
 
     <!--
-      VORA Mirror browser SDK, loaded from the CDN.
+      Embedded Fields browser SDK, loaded from the CDN.
 
       This is the supported delivery channel for the browser SDK — there is
       no public npm package to install. The script attaches a global `Vora`
@@ -111,7 +111,7 @@
     <h1>Von Payments — Embedded checkout</h1>
     <p>
       The card field below is rendered inside a Von Payments-owned iframe
-      (VORA Mirror). Card data never touches this page or its server.
+      (Embedded Fields). Card data never touches this page or its server.
     </p>
 
     <form id="checkout-form" autocomplete="off">
@@ -125,9 +125,11 @@
     <div id="status" class="status"></div>
 
     <div class="test-cards">
-      <strong>Test mode:</strong> enter any test card your sandbox's payment
-      provider accepts. The order total decides the outcome, not the card: this
-      49.99 total approves, and specific totals decline — see
+      <strong>Test mode:</strong> use <code>9000 1001 1111 1111</code> (approves),
+      <code>4111 1111 1110 1203</code> (3-D Secure, no challenge) or
+      <code>4111 1111 1118 1072</code> (3-D Secure challenge), expiry
+      <code>03/30</code>, CVC <code>100</code>. Other test numbers such as 4242
+      are declined. A total of 2,000.12 declines; see
       <a href="https://docs.vonpay.com/reference/test-cards">Test mode</a>.
     </div>
 

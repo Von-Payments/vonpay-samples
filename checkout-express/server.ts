@@ -1,38 +1,31 @@
 import express from "express";
-import { VonPayCheckout } from "@vonpay/checkout-node";
+import { VonPayCheckout, minorUnitDigits } from "@vonpay/checkout-node";
 
 function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 /**
- * True when this runtime recognises `code` as a real currency. `Intl` does NOT
- * throw on a well-formed but unknown code (e.g. "XYZ"): it quietly assumes 2
- * decimals, which would show a confident wrong amount. So check the runtime's
- * own currency list first, and when a runtime has no such list, trust Intl.
- */
-function isKnownCurrency(code: string): boolean {
-  const supportedValuesOf = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
-  return typeof supportedValuesOf !== "function" || supportedValuesOf("currency").includes(code);
-}
-
-/**
  * Format an amount in MINOR units (what the API sends) for display.
  * Not every currency has 2 decimals (JPY has 0, KWD has 3), so dividing by 100
- * shows the wrong figure for those — ask the currency data instead.
+ * shows the wrong figure for those. The decimals come from the SDK's
+ * `minorUnitDigits` — the API's own table, the same decimals the API charged
+ * with. (Intl's data can disagree with the API, e.g. for ISK, so only the
+ * symbol comes from Intl.)
  */
 function formatMinorAmount(amount: number, currency: string): string {
   const code = currency.toUpperCase();
-  let formatter: Intl.NumberFormat;
-  try {
-    if (!isKnownCurrency(code)) throw new RangeError(`unknown currency ${code}`);
-    formatter = new Intl.NumberFormat("en", { style: "currency", currency: code });
-  } catch {
-    // Malformed (Intl throws) or not a currency this runtime knows. Show the raw minor units rather than guess.
+  const digits = minorUnitDigits(code);
+  if (digits === undefined) {
+    // Malformed or unrecognised currency code. Show the raw minor units rather than guess.
     return `${amount} ${code} (minor units)`;
   }
-  const exponent = formatter.resolvedOptions().maximumFractionDigits ?? 2;
-  return formatter.format(amount / 10 ** exponent);
+  return new Intl.NumberFormat("en", {
+    style: "currency",
+    currency: code,
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(amount / 10 ** digits);
 }
 
 const app = express();

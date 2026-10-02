@@ -3,7 +3,7 @@
 Server-side **save-a-card, then rebill it** flow: vault a reusable card, run the cardholder-initiated anchor charge, then fire a **merchant-initiated (MIT)** recurring renewal against the card on file. Single-script Node.js demo against the Vonpay Checkout API.
 
 - **Stack:** Node 20+, TypeScript strict, ESM
-- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x - 2.11.0 or later (`^2.11.0`)
+- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 3.x - 3.4.0 or later (`^3.4.0`)
 - **Best for:** Subscriptions, recurring billing, scheduled installments, retry/dunning loops - anywhere you charge a saved card while the buyer is not present.
 
 ## What it demonstrates
@@ -81,7 +81,7 @@ done { savedCard: 'vp_pmt_test_...', anchorTransactionId: 'vpi_test_...', renewa
 
 > **Branch on the capability matrix.** `supportedOperations.mit` reports what your account's payment provider supports - on a test key too, since a sandbox reports its own provider's matrix. When it is `false` the sample stops cleanly after the anchor charge rather than faking a renewal. This is exactly how your code should behave - never hard-code per-processor assumptions.
 >
-> In test mode the order total decides whether a charge is approved, not the card: this sample's 29.99 approves, and specific totals decline (see [Test mode](https://docs.vonpay.com/reference/test-cards)).
+> In test mode the order total decides a decline, not the card: this sample's 29.99 approves, and 2,000.12 (`200012`) is declined by the card's issuer. Save the card with one of your sandbox's test cards: `9000 1001 1111 1111` (approves with no 3-D Secure step), expiry `03/30`, CVC `100`. Common numbers such as `4242 4242 4242 4242` are declined (see [Test mode](https://docs.vonpay.com/reference/test-cards)).
 
 ## Scripts
 
@@ -105,7 +105,7 @@ The default base URL is production (`checkout.vonpay.com`). A `vp_sk_test_` key 
 
 Nothing is auto-created, on a test key or a live one: `tokens.create` saves the card your payment provider already holds, and no card data crosses your server - which is the point of tokenization.
 
-With an iframe-vault provider, the buyer's card never touches your server. Your browser front-end (e.g. [VORA Mirror](https://docs.vonpay.com/mirror/quickstart)) collects the card in a hosted iframe and mints a vault handle; you pass that handle as `providerReference` to `tokens.create`, along with `setupForFutureUse: "off_session"` to capture reuse consent. The resulting `vp_pmt_*` token is what you keep on file and rebill.
+With an iframe-vault provider, the buyer's card never touches your server. Your browser front-end (e.g. [Embedded Fields](https://docs.vonpay.com/embedded-fields/quickstart)) collects the card in a hosted iframe and mints a vault handle; you pass that handle as `providerReference` to `tokens.create`, along with `setupForFutureUse: "off_session"` to capture reuse consent. The resulting `vp_pmt_*` token is what you keep on file and rebill.
 
 ```typescript
 const token = await vonpay.tokens.create({
@@ -191,10 +191,10 @@ If the token isn't vaulted off-session, the MIT charge would be rejected with `p
 ## Reference docs
 
 - [Payment intents guide - saved cards / MIT](https://docs.vonpay.com/integration/payment-intents#saved-cards--merchant-initiated-mit-charges)
-- [Tokenization - reusability model](https://docs.vonpay.com/mirror/tokenization)
+- [Tokenization - reusability model](https://docs.vonpay.com/embedded-fields/tokenization)
 - [Test mode - the order totals that decline](https://docs.vonpay.com/reference/test-cards)
 - [Error codes](https://docs.vonpay.com/reference/error-codes)
 
 ## Tested against
 
-`@vonpay/checkout-node` 2.x - typecheck with `npm run typecheck`.
+`@vonpay/checkout-node` 3.x - typecheck with `npm run typecheck`.

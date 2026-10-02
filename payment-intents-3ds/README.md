@@ -3,7 +3,7 @@
 Server-side handling for a payment intent that returns **`requires_action`** - the issuer wants to challenge the buyer (3D Secure / Strong Customer Authentication). Single Express server that creates the intent, redirects the buyer to the bank's challenge page, and confirms the terminal outcome from the webhook.
 
 - **Stack:** Node 20+, TypeScript strict, ESM, Express 5
-- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x - **2.11.0 or later** (`^2.11.0`): 2.5.0 is the first release that types `returnUrl` on `paymentIntents.create`, and 2.7.0 the first that types `test_event` on webhook events
+- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 3.x - **3.4.0 or later** (`^3.4.0`): 2.5.0 is the first release that types `returnUrl` on `paymentIntents.create`, and 2.7.0 the first that types `test_event` on webhook events
 - **Best for:** server-driven (Payment Intents) integrations in regions where SCA applies (EU/UK/EEA), or any flow where the issuer may step up to 3DS
 
 ## The 3DS server-side model in one paragraph
@@ -39,7 +39,7 @@ Test payments run on a sandbox account backed by a payment provider's test envir
 
 ### 2. A saved card to charge
 
-This server-only sample charges a card that is already saved (`vp_pmt_test_…`). Nothing is made up for you in test mode: save a real card on your sandbox with `tokens.create` (see the [saved-cards-mit](../saved-cards-mit) sample), using a test card your payment provider's test environment challenges for 3-D Secure. Set its token as `VON_PAY_PAYMENT_METHOD` and the buyer you saved it for as `VON_PAY_BUYER_ID`. Without a card, `/charge` answers `400` and charges nothing.
+This server-only sample charges a card that is already saved (`vp_pmt_test_…`). Nothing is made up for you in test mode: save a real card on your sandbox with `tokens.create` (see the [saved-cards-mit](../saved-cards-mit) sample), using the sandbox's challenge card `4111 1111 1118 1072` (Mastercard: `5240 0000 0000 1072`), expiry `03/30`, CVC `100`. Set its token as `VON_PAY_PAYMENT_METHOD` and the buyer you saved it for as `VON_PAY_BUYER_ID`. Without a card, `/charge` answers `400` and charges nothing.
 
 The card is never read from the request. Card ids are not secrets (they show up in logs, support tickets and your own saved-card screens), so a route that charges whatever card id it is sent lets anyone charge anyone's saved card. In a real app, look up the signed-in customer's card on your server and send `buyerId` with the charge: the API refuses a card that was saved for a different buyer.
 
@@ -63,9 +63,18 @@ When the bank challenges, `/charge` responds `303` with a `Location` header poin
 
 ## Getting a 3DS challenge in test mode
 
-Whether the bank challenges is decided by your sandbox's payment provider test environment, from the card you saved - Von Payments does not simulate it. Use a card that provider documents as challenging for 3-D Secure (your dashboard shows the provider's test cards for your sandbox).
+Whether the bank challenges is decided by your sandbox's payment provider test environment, from the card you saved - Von Payments does not simulate it. Your sandbox runs 3-D Secure on every card payment:
 
-Declines are decided by the order total, not the card: an ordinary total like this sample's 49.99 approves, and specific totals decline (see [Test mode](https://docs.vonpay.com/reference/test-cards)).
+| Card | What happens |
+|---|---|
+| `9000 1001 1111 1111` | Not enrolled in 3-D Secure: approves |
+| `4111 1111 1110 1203` (Visa) / `5200 0000 0000 1203` (Mastercard) | 3-D Secure with no challenge: approves |
+| `4111 1111 1118 1072` (Visa) / `5240 0000 0000 1072` (Mastercard) | 3-D Secure challenge: you choose pass or fail |
+| any card above at an order total of 2,000.12 (`200012`) | Declined by the card's issuer |
+
+Use expiry `03/30` and CVC `100`. Common numbers such as `4242 4242 4242 4242` are declined. If your dashboard shows different test cards for your sandbox, use those.
+
+Declines are decided by the order total, not the card: an ordinary total like this sample's 49.99 approves, and 2,000.12 (`200012`) declines (see [Test mode](https://docs.vonpay.com/reference/test-cards)).
 
 `vp_pmt_test_*` tokens work only with test keys - a live key refuses one with `400 payment_method_mode_mismatch`.
 
@@ -78,7 +87,7 @@ The buyer's browser returning to `/3ds/return` tells you the challenge *finished
 
 `vonpay.webhooks.constructEvent` verifies the signature and returns the typed `WebhookEvent` union, which includes the `payment_intent.*` events - discriminator `type`, body nested under `data`, decline reason at `data.failure_reason` (see the [webhook events reference](https://docs.vonpay.com/integration/webhook-events)). Switching on `event.type` narrows `event.data`, so there is no second parse and no widened type. Dedupe redeliveries on the event `id` (`vp_evt_*`) with a durable store.
 
-**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^2.11.0` covers it).
+**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^3.4.0` covers it).
 
 ### Testing the webhook locally
 
@@ -122,4 +131,4 @@ The default base URL is production (`checkout.vonpay.com`). A `vp_sk_test_` key 
 
 ## Tested against
 
-`@vonpay/checkout-node` 2.x (2.11.0 or later) - typecheck with `npm run typecheck`. End-to-end 3DS smoke (charge → redirect → challenge → `payment_intent.succeeded` webhook) requires a `vp_sk_test_…` key plus a publicly reachable `/webhooks` URL.
+`@vonpay/checkout-node` 3.x (3.4.0 or later) - typecheck with `npm run typecheck`. End-to-end 3DS smoke (charge → redirect → challenge → `payment_intent.succeeded` webhook) requires a `vp_sk_test_…` key plus a publicly reachable `/webhooks` URL.

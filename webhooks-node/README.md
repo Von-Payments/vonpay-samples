@@ -3,7 +3,7 @@
 A standalone reference integration showing how to **receive, verify, and process** Von Payments webhooks. The other samples in this repo show how to *send* API calls - this one shows how to handle the asynchronous events Von Payments delivers back to you.
 
 - **Stack:** Node 20+, Express 5, TypeScript strict, ESM
-- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x - 2.11.0 or later (`^2.11.0`)
+- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 3.x - 3.4.0 or later (`^3.4.0`)
 - **Best for:** any merchant or integrator that needs to react to settlement, failures, or refunds
 
 ## What it demonstrates
@@ -111,7 +111,7 @@ const event = vonpay.webhooks.constructEvent(
 
 `constructEvent` parses the header, recomputes `HMAC_SHA256(secret, "${t}.${rawBody}")`, timing-safe-compares against each `v1=` entry (it accepts on any match, which is what makes a secret rotation seamless), enforces the replay window (reject if `now − t > 5 min` or `t − now > 30 sec`), and returns a typed `WebhookEvent`. It throws on any failure - catch it and return `400`.
 
-**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^2.11.0` covers it). It runs before the dedupe step.
+**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^3.4.0` covers it). It runs before the dedupe step.
 
 **Raw-body parsing** is mounted on the webhook route ONLY:
 
@@ -150,4 +150,4 @@ There is no `session.expired` / "buyer abandoned the checkout" event today. The 
 
 ## Tested against
 
-`@vonpay/checkout-node` 2.x · Node 20+ · Express 5
+`@vonpay/checkout-node` 3.x · Node 20+ · Express 5

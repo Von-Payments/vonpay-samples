@@ -1,16 +1,17 @@
-# Von Payments — sample apps (llms.txt)
+# Von Payments - sample apps (llms.txt)
 
 > Machine-readable index for AI agents integrating the Von Payments Checkout API.
 > Runnable, copy-pasteable sample apps live in this repo. Factual only.
-> Checked against the samples' code and the published SDK types on 2026-09-21.
+> Checked against the samples' code and the published SDK types on 2026-10-02.
 
-## SDK release lines (checked 2026-09-21)
+## SDK release lines (checked 2026-10-02)
 
-- @vonpay/checkout-node — samples pin ^2 (lockfiles 2.0.0); current 2.6.1 (npm)   # Node / TypeScript server SDK
-- vonpay-checkout — samples pin >=2,<3; current 2.6.1 (PyPI)                       # Python server SDK
-- @vonpay/checkout-mcp — sample pins ^1 (lockfile 1.0.0); current 2.0.1 (npm)      # MCP server for AI-agent runtimes
-- @vonpay/checkout-cli — not pinned by any sample; current 0.5.3 (npm)             # CLI for ad-hoc testing / agent tool use
-- vora.js — CDN only at https://js.vonpay.com/v1/vora.js                          # browser SDK for embedded card fields; NO npm package
+- @vonpay/checkout-node - samples pin ^3.4.0 (lockfiles 3.4.0); current 3.4.0 (npm)  # Node / TypeScript server SDK
+- vonpay-checkout - samples pin >=3.4,<4; current 3.4.0 (PyPI)                      # Python server SDK
+- @vonpay/checkout-mcp - sample pins ^5.2.0 (lockfile 5.2.0); current 5.2.0 (npm)  # MCP server for AI-agent runtimes
+- @vonpay/checkout-cli - not pinned by any sample; current 0.11.0 (npm)            # CLI for ad-hoc testing / agent tool use
+- @vonpay/test-cards - not pinned by any sample; current 0.2.0 (npm)               # the sandbox test cards as data
+- vora.js - CDN only at https://js.vonpay.com/v1/vora.js                          # browser SDK for embedded card fields; NO npm package
 
 Never pin a 0.x version: a caret on 0.x locks the minor and the pin can never
 move. Each sample pins its own range: read the sample's package.json (Node)
@@ -19,18 +20,18 @@ assuming. "Current" above is a point-in-time reading.
 
 ## Samples (name → purpose → SDK)
 
-- checkout-nextjs — Hosted checkout (cart → redirect → confirmation), Next.js 15. → @vonpay/checkout-node
-- checkout-express — Hosted checkout, server-only, Express 5. → @vonpay/checkout-node
-- checkout-flask — Hosted checkout, server-only, Flask. → vonpay-checkout (Python)
-- checkout-paybylink-nextjs — Pay-by-link: operator generates a link, customer pays. → @vonpay/checkout-node
-- platform-integrator-nextjs — Multi-tenant platform: per-merchant credential lookup, tenant-scoped sessions, multi-tenant webhook routing. → @vonpay/checkout-node
-- payment-intents-node — Server-side Payment Intents: auth → capture → refund, idempotency replay. → @vonpay/checkout-node
-- payment-intents-python — Python mirror of payment-intents-node. → vonpay-checkout (Python)
-- payment-intents-3ds — 3DS / requires_action handling: branch on status, redirect to issuer challenge, confirm terminal state from webhook. → @vonpay/checkout-node
-- saved-cards-mit — Vault a card off-session, anchor a cardholder-initiated charge, then rebill with the mit block (recurring / subscriptions). → @vonpay/checkout-node
-- checkout-embedded — Embedded "Vora Mirror" card fields via the CDN <script>: collect card in-page, tokenize, charge the vp_pmt_* token server-side. → vora.js (CDN) + @vonpay/checkout-node
-- webhooks-node — Webhook receiver: verify signature, idempotent processing, replay-window enforcement. → @vonpay/checkout-node
-- agent-mcp — Wire @vonpay/checkout-mcp into an MCP-aware runtime (Claude Code, Cursor, Claude Desktop, custom agent). Config-only, no runtime to host. → @vonpay/checkout-mcp
+- checkout-nextjs - Hosted checkout (cart → redirect → confirmation), Next.js 15. → @vonpay/checkout-node
+- checkout-express - Hosted checkout, server-only, Express 5. → @vonpay/checkout-node
+- checkout-flask - Hosted checkout, server-only, Flask. → vonpay-checkout (Python)
+- checkout-paybylink-nextjs - Pay-by-link: operator generates a link, customer pays. → @vonpay/checkout-node
+- platform-integrator-nextjs - Multi-tenant platform: per-merchant credential lookup, tenant-scoped sessions, multi-tenant webhook routing. → @vonpay/checkout-node
+- payment-intents-node - Server-side Payment Intents: auth → capture → refund, idempotency replay. → @vonpay/checkout-node
+- payment-intents-python - Python mirror of payment-intents-node. → vonpay-checkout (Python)
+- payment-intents-3ds - 3DS / requires_action handling: branch on status, redirect to issuer challenge, confirm terminal state from webhook. → @vonpay/checkout-node
+- saved-cards-mit - Vault a card off-session, anchor a cardholder-initiated charge, then rebill with the mit block (recurring / subscriptions). → @vonpay/checkout-node
+- checkout-embedded - Embedded Fields (in-page card fields) via the CDN <script>: collect card in-page, tokenize, charge the vp_pmt_* token server-side. → vora.js (CDN) + @vonpay/checkout-node
+- webhooks-node - Webhook receiver: verify signature, idempotent processing, replay-window enforcement. → @vonpay/checkout-node
+- agent-mcp - Wire @vonpay/checkout-mcp into an MCP-aware runtime (Claude Code, Cursor, Claude Desktop, custom agent). Config-only, no runtime to host. → @vonpay/checkout-mcp
 
 ## Guardrails (get these right)
 
@@ -45,12 +46,15 @@ assuming. "Current" above is a point-in-time reading.
    The event is an envelope `{ id: "vp_evt_*", type, created, livemode,
    merchant_id, data }`: payload under `data`, merchant id is `merchant_id`.
    Dedupe on `id`.
-   Event names in the 2.x SDK's typed union: charge.succeeded, charge.failed,
+   Event names in the 3.x SDK's typed union: charge.succeeded, charge.failed,
    charge.refunded, refund.failed, payment_intent.succeeded,
-   payment_intent.failed, payment_intent.cancelled, session.succeeded,
-   session.failed, dispute.created, dispute.won, dispute.lost,
-   application.approved, application.denied, merchant.ready_for_payments,
-   payout.paid, payout.failed.
+   payment_intent.failed, payment_intent.cancelled, payment_intent.authorized,
+   session.succeeded, session.failed, dispute.created, dispute.won,
+   dispute.lost, application.approved, application.denied,
+   merchant.ready_for_payments, payout.paid, payout.failed,
+   mirror.order.created.
+   payment_intent.authorized fires only for a captureMethod "manual" payment:
+   the money is held, not taken. Do not fulfil on it; capture or void.
    The samples handle charge.* + refund.failed (hosted checkout / refunds) and
    payment_intent.succeeded / payment_intent.failed (server-driven flow).
    There is NO session.expired and NO refund.created event; do not claim them
@@ -64,7 +68,7 @@ assuming. "Current" above is a point-in-time reading.
 2. Embedded card fields use the CDN <script>, not a processor SDK.
    Load the browser SDK from the CDN <script> at
    https://js.vonpay.com/v1/vora.js. Do NOT add or npm-install any
-   processor or card-network SDK for embedded checkout — the card
+   processor or card-network SDK for embedded checkout - the card
    field is served by Von Payments and tokenizes the card in a hosted iframe so
    card data never touches your server or DOM.
 
@@ -98,28 +102,48 @@ assuming. "Current" above is a point-in-time reading.
    If the lookup throws, log it and show the neutral page. Render
    `outcome.amount` from the server, never `params.amount` from the URL.
 
-## Type coverage on the 2.x SDK
+5. Sandbox test cards.
+   A sandbox runs 3-D Secure on every card payment, so only the payment
+   provider's test cards work, with expiry 03/30 and CVC 100:
+   9000 1001 1111 1111 (not enrolled, approves);
+   4111 1111 1110 1203 / Mastercard 5200 0000 0000 1203 (3-D Secure, no
+   challenge, approves); 4111 1111 1118 1072 / Mastercard 5240 0000 0000 1072
+   (3-D Secure challenge, pass or fail). An order total of 2,000.12
+   (amount 200012) declines any of them. Common numbers such as
+   4242 4242 4242 4242 are declined. Always send a return URL: a card payment
+   can pause for 3-D Secure. If the dashboard shows different test cards for
+   the sandbox, use those. Same list as data: @vonpay/test-cards; from an
+   agent: the MCP list_test_cards tool (@vonpay/checkout-mcp 5.2.0+).
 
-`paymentMethod` (2.0.0+), `returnUrl` (2.5.0+), `buyerId`, `mit`,
-`captureMethod`, `sessionId` are typed on `CreatePaymentIntentParams`.
-`PaymentIntent.nextAction` is the structured `{ type: "redirect_to_url",
-redirectToUrl: { url } }` object (or null). `payment_intent.*` events are in
-the typed `WebhookEvent` union. The 0.9-era local type bridges some samples
-still carry are redundant on 2.x; do not copy them into new code.
+6. Amounts are minor units.
+   Never divide or multiply by 100 (JPY has 0 decimals, KWD has 3). Use the
+   Node SDK's minorUnitDigits(currency) / formatMinorUnits(amount, currency),
+   exported since 3.0.0; minorUnitDigits returns undefined (never a guess) for
+   a code the API does not know or whose decimals are still being confirmed,
+   so show raw minor units rather than convert.
+
+## Type coverage on the 3.x SDK
+
+`paymentMethod`, `returnUrl`, `buyerId`, `mit`, `captureMethod`, `sessionId`
+are typed on `CreatePaymentIntentParams`. `PaymentIntent.nextAction` is the
+structured `{ type: "redirect_to_url", redirectToUrl: { url } }` object (or
+null). `payment_intent.*` events are in the typed `WebhookEvent` union. None
+of the samples carry the old local type bridges any more; do not
+reintroduce them.
 
 ## Key prefixes
 
-- vp_sk_test_* / vp_sk_live_* — secret API key (server-only)
-- vp_pk_test_* / vp_pk_live_* — publishable key
-- whsec_* — per-endpoint webhook signing secret (webhook verification)
-- ss_test_* / ss_live_* — session signing secret. Not read by any sample:
+- vp_sk_test_* / vp_sk_live_* - secret API key (server-only)
+- vp_pk_test_* / vp_pk_live_* - publishable key
+- whsec_* - per-endpoint webhook signing secret (webhook verification)
+- ss_test_* / ss_live_* - session signing secret. Not read by any sample:
   return URLs are confirmed server-side via sessions.confirmReturn(), not by a
   merchant-side signature check.
-- vp_pmt_* — saved-card / payment-method token
-- vpi_* — payment intent id
-- vp_evt_* — webhook event id (dedupe key)
-- vp_cs_* — checkout session id
-- vpr_* — refund id
+- vp_pmt_* - saved-card / payment-method token
+- vpi_* - payment intent id
+- vp_evt_* - webhook event id (dedupe key)
+- vp_cs_* - checkout session id
+- vpr_* - refund id
 
 ## How this repo is maintained
 
