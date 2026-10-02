@@ -1,12 +1,12 @@
 /**
- * Von Payments — Embedded checkout (VORA Mirror) sample server.
+ * Von Payments — Embedded checkout (Embedded Fields) sample server.
  *
- * VORA Mirror is the embedded card-collection path: the buyer stays on
+ * Embedded Fields is the embedded card-collection path: the buyer stays on
  * your domain and the card field is rendered inside a Von Payments-owned
  * iframe loaded from the browser SDK at https://js.vonpay.com/v1/vora.js.
  * Sensitive card data never touches this server or your DOM.
  *
- * This server does the one thing a VORA Mirror integration needs a
+ * This server does the one thing an Embedded Fields integration needs a
  * backend for: it creates a checkout session with your SECRET key so the
  * browser never sees it. The browser then retrieves the session with the
  * PUBLISHABLE key and mounts the card field.

@@ -3,7 +3,7 @@
 Multi-tenant reference integration for platforms (CRMs, subscription engines, ISVs) that resell Von Payments to their own merchants. Demonstrates the per-tenant credential pattern: each merchant onboarded to the platform has their own Von Payments API key and webhook signing secret stored on the platform side; the platform looks up the right credentials at charge time and at webhook time.
 
 - **Stack:** Next.js 15 / React 19 / TypeScript strict
-- **Von Payments SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x - 2.11.0 or later (`^2.11.0`)
+- **Von Payments SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 3.x - 3.4.0 or later (`^3.4.0`)
 - **Best for:** subscription-billing CRMs, headless commerce platforms, ISV cart products, marketplace operators - anywhere your product has many "merchants" and each wants to plug Von Payments in as their gateway
 
 ## What it demonstrates
@@ -57,7 +57,7 @@ Open `http://localhost:3000`:
 2. Click **Charge** on a customer row
 3. The browser hits `/api/charge` with the customer id only. The route looks up Acme's keys and the customer's price on the server, and creates a session. The browser never sends an amount - anything a browser sends can be edited, so the price must come from your own records
 4. You're redirected to the Von Payments hosted checkout
-5. Complete with a [test card](https://docs.vonpay.com/reference/test-cards) (e.g. `4242 4242 4242 4242`)
+5. Complete with a sandbox test card: `9000 1001 1111 1111`, expiry `03/30`, CVC `100` (approves). Your sandbox runs 3-D Secure on every card payment, so only the payment provider's 3-D Secure test cards work; common numbers such as `4242 4242 4242 4242` are declined. For a challenge use `4111 1111 1118 1072`; to test a decline, give the customer a price of 2,000.12. [Test mode](https://docs.vonpay.com/reference/test-cards)
 6. Return to `/tenants/tenant_a/confirm` - the page re-reads the session from the API using **Acme's** own secret key, not the other tenants'. ⚠️ It does NOT verify the return signature: that signature uses a platform-wide secret no tenant holds, so a per-tenant check could only ever fail. The per-tenant isolation here comes from the API key, which is the stronger guarantee
 
 ### 3. Test webhooks (optional)
@@ -121,7 +121,7 @@ The signature is verified using the **tenant's** per-endpoint `whsec_*` secret (
 
 `constructEvent` takes **three** arguments - `(rawBody, signatureHeader, whsec)`. The signed timestamp lives inside the `x-vonpay-signature` header (`t=<unix>,v1=<hex>`); there is no separate timestamp header.
 
-**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^2.11.0` covers it).
+**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^3.4.0` covers it).
 
 ### Idempotent event processing
 
@@ -151,4 +151,4 @@ Webhook deliveries are retried on failure. The receiver must dedupe. The sample 
 
 ## Tested against
 
-`@vonpay/checkout-node` 2.x - typecheck with `npm run typecheck`.
+`@vonpay/checkout-node` 3.x - typecheck with `npm run typecheck`.

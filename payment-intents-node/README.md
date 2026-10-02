@@ -3,7 +3,7 @@
 Server-side payment intent flow: **authorize → capture → partial refund**, plus an idempotency replay. Single-script Node.js demo against the Vonpay Checkout API.
 
 - **Stack:** Node 20+, TypeScript strict, ESM
-- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 2.x - 2.11.0 or later (`^2.11.0`)
+- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 3.x - 3.4.0 or later (`^3.4.0`)
 - **Best for:** B2B / invoicing flows, headless billing where the merchant server drives the lifecycle (no hosted checkout)
 
 ## What it demonstrates
@@ -97,7 +97,7 @@ Each step is wrapped in `try`/`catch`. Every lifecycle call throws a typed `VonP
 - Move `VON_PAY_SECRET_KEY` into your secret manager (AWS Secrets Manager, Vault, Doppler, etc.). Never commit it.
 - Treat `Idempotency-Key` as required, not optional. Use a deterministic value tied to the upstream order (e.g. `order:{order_id}:authorize`) so retries collapse cleanly.
 - Read `vonpay.capabilities.get()` once at startup - `supportedOperations.voidAfterCapture` tells you whether a post-capture void is `rerouted_to_refund` (most processors), so you can branch between `paymentIntents.void()` and `refunds.create()` without round-tripping a failed call.
-- Inspect `intent.status` after `create` - your code should handle the decline path, not just the happy path. In test mode the order total decides the outcome, not the card: an ordinary total approves, and specific totals decline (for example `200011`, i.e. 2,000.11, returns `insufficient_funds`). The full list is in [Test mode](https://docs.vonpay.com/reference/test-cards).
+- Inspect `intent.status` after `create` - your code should handle the decline path, not just the happy path. In test mode the order total decides a decline, not the card: an ordinary total approves, and an order total of `200012` (2,000.12) is declined by the card's issuer. Save the card with one of your sandbox's test cards (`9000 1001 1111 1111` approves, expiry `03/30`, CVC `100`; common numbers such as `4242 4242 4242 4242` are declined). See [Test mode](https://docs.vonpay.com/reference/test-cards).
 
 ## Reference docs
 
@@ -107,4 +107,4 @@ Each step is wrapped in `try`/`catch`. Every lifecycle call throws a typed `VonP
 
 ## Tested against
 
-`@vonpay/checkout-node` 2.x - typecheck with `npm run typecheck`. Live sandbox smoke (auth → capture → refund → idempotency replay) requires a `vp_sk_test_…` key.
+`@vonpay/checkout-node` 3.x - typecheck with `npm run typecheck`. Live sandbox smoke (auth → capture → refund → idempotency replay) requires a `vp_sk_test_…` key.

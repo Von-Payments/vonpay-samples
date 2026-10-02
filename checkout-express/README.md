@@ -3,7 +3,7 @@
 Minimal end-to-end reference integration on Express 5: create a session, redirect the buyer to `checkout.vonpay.com`, confirm the outcome server-side on `/success`, and verify HMAC webhooks on `/webhooks`.
 
 - **Stack:** Express 5, TypeScript (run via `tsx`)
-- **Von Payments SDK:** `@vonpay/checkout-node` 2.x - 2.11.0 or later (`^2.11.0`)
+- **Von Payments SDK:** `@vonpay/checkout-node` 3.x - 3.4.0 or later (`^3.4.0`)
 - **What it demonstrates:** session creation with an idempotency key, server-side return confirmation, HMAC webhook verification with raw-body parsing
 
 ## 5-minute setup
@@ -50,12 +50,12 @@ The `sessions.create()` call sends an idempotency key derived from the order id,
 
 Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header - there is no separate timestamp header). `vonpay.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent` discriminated union. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) - not your API key.
 
-**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^2.11.0` covers it).
+**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^3.4.0` covers it).
 
 ## Security notes
 
 - **Always use raw body for webhook verification.** This sample mounts `express.raw({ type: "application/json" })` only on `/webhooks` so the body is the exact bytes that were signed, not a parsed object.
-- **Pin the SDK.** `"latest"` drifts silently; this sample pins the major with a 2.11.0 floor (`^2.11.0`) and commits a lockfile.
+- **Pin the SDK.** `"latest"` drifts silently; this sample pins the major with a 3.4.0 floor (`^3.4.0`) and commits a lockfile.
 - **Two different secrets.** The webhook signing secret (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) signs webhooks. The API key (`vp_sk_*`) authenticates API calls and is what confirms a return. A per-merchant session signing secret (`ss_*`) is not used: it cannot verify the return redirect.
 
 ## Related

@@ -1,31 +1,32 @@
-# AGENTS.md — guidance for AI coding agents
+# AGENTS.md - guidance for AI coding agents
 
 You're extending the Von Payments sample apps. This file gives you the facts you
 need to do it correctly: the SDK release lines the samples build against, the
-guardrails that are easy to get wrong, what the 2.x SDK types cover, and how to
+guardrails that are easy to get wrong, what the 3.x SDK types cover, and how to
 pick a starting sample.
 
-Read this alongside [`llms.txt`](./llms.txt). Keep everything factual — no
+Read this alongside [`llms.txt`](./llms.txt). Keep everything factual - no
 invented endpoints, events, or fields. Every claim below was checked against the
-samples' code and the published SDK type definitions on **2026-09-21**; when in
+samples' code and the published SDK type definitions on **2026-10-02**; when in
 doubt, the sample's own `package.json` / `requirements.txt` and the installed
 SDK's `.d.ts` files win over this page.
 
-## SDK release lines (checked 2026-09-21)
+## SDK release lines (checked 2026-10-02)
 
 | Package | Samples pin | Current release | Where |
 |---|---|---|---|
-| `@vonpay/checkout-node` | `^2` (lockfiles at `2.0.0`) | `2.6.1` | npm — Node / TypeScript server SDK |
-| `vonpay-checkout` | `>=2,<3` | `2.6.1` | PyPI — Python server SDK |
-| `@vonpay/checkout-mcp` | `^1` (lockfile at `1.0.0`) | `2.0.1` | npm — MCP server (`agent-mcp` sample) |
-| `@vonpay/checkout-cli` | not pinned by any sample | `0.5.3` | npm — CLI |
-| `vora.js` | CDN only, `https://js.vonpay.com/v1/vora.js` | `/v1/` channel auto-ships patches | browser SDK for embedded card fields — **no npm package** |
+| `@vonpay/checkout-node` | `^3.4.0` (lockfiles at `3.4.0`) | `3.4.0` | npm - Node / TypeScript server SDK |
+| `vonpay-checkout` | `>=3.4,<4` | `3.4.0` | PyPI - Python server SDK |
+| `@vonpay/checkout-mcp` | `^5.2.0` (lockfile at `5.2.0`) | `5.2.0` | npm - MCP server (`agent-mcp` sample) |
+| `@vonpay/checkout-cli` | not pinned by any sample | `0.11.0` | npm - CLI |
+| `@vonpay/test-cards` | not pinned by any sample | `0.2.0` | npm - the sandbox test cards as data |
+| `vora.js` | CDN only, `https://js.vonpay.com/v1/vora.js` | `/v1/` channel auto-ships patches | browser SDK for embedded card fields - **no npm package** |
 
 Rules of thumb:
 
 - **Never pin to a 0.x version.** A caret range on 0.x locks the *minor*, so the
   pin can never move; the samples sat on `^0.9.0` for a year that way, through a
-  webhook envelope change and a money bug. Use the `2.x` line for the server SDKs.
+  webhook envelope change and a money bug. Use the `3.x` line for the server SDKs.
 - **Always check the sample's own `package.json` (Node) or `requirements.txt`
   (Python)** for the range it is built against rather than assuming. The
   "current release" column above is a point-in-time reading, not a promise.
@@ -58,32 +59,36 @@ Rules of thumb:
    over the **raw** request body.
 
    The parsed event is an envelope: `{ id: "vp_evt_*", type, created, livemode,
-   merchant_id, data }` — the payload is nested under `data`, the merchant id is
+   merchant_id, data }` - the payload is nested under `data`, the merchant id is
    the snake-case `merchant_id`. Dedupe on `id`; handlers must be idempotent.
 
-   Event names in the 2.x SDK's typed `WebhookEventType` union:
+   Event names in the 3.x SDK's typed `WebhookEventType` union:
    `charge.succeeded`, `charge.failed`, `charge.refunded`, `refund.failed`,
    `payment_intent.succeeded`, `payment_intent.failed`, `payment_intent.cancelled`,
-   `session.succeeded`, `session.failed`, `dispute.created`, `dispute.won`,
-   `dispute.lost`, `application.approved`, `application.denied`,
-   `merchant.ready_for_payments`, `payout.paid`, `payout.failed`.
+   `payment_intent.authorized`, `session.succeeded`, `session.failed`,
+   `dispute.created`, `dispute.won`, `dispute.lost`, `application.approved`,
+   `application.denied`, `merchant.ready_for_payments`, `payout.paid`,
+   `payout.failed`, `mirror.order.created`.
+
+   `payment_intent.authorized` fires only for a `captureMethod: "manual"`
+   payment: the money is held, not taken. Do not fulfil on it; capture or void.
 
    The samples branch on `charge.succeeded` / `charge.failed` / `charge.refunded`
    / `refund.failed` (hosted checkout + refunds) and `payment_intent.succeeded` /
    `payment_intent.failed` (server-driven flow). There is **no** `session.expired`
-   and **no** `refund.created` event — do not invent them. (A refund shows up as
+   and **no** `refund.created` event - do not invent them. (A refund shows up as
    `charge.refunded`.)
 
    ⚠️ **Do not subscribe an endpoint to `session.succeeded` / `session.failed`.**
    They are typed and emitted internally, but they are not in the merchant
-   subscription catalog — which accepts an unknown key, stores nothing and
+   subscription catalog - which accepts an unknown key, stores nothing and
    returns success. An endpoint subscribed to one receives nothing, forever,
    with no error at any layer. `charge.*` is the subscribable family for
    hosted-checkout fulfilment.
 
 2. **Embedded card fields load `vora.js` from the CDN `<script>`** at
    `https://js.vonpay.com/v1/vora.js`. Do **not** add or npm-install any
-   processor or card-network SDK for embedded checkout — the card is collected
+   processor or card-network SDK for embedded checkout - the card is collected
    in a Von Payments hosted iframe, so card data never touches your server or
    DOM. The `/v1/` channel is mutable (patch releases ship to it), so it carries
    no `integrity` attribute; pin an immutable `/vX.Y.Z/` path plus its published
@@ -95,7 +100,7 @@ Rules of thumb:
    directly). **Send `buyerId` on every charge against a saved card.** It is a
    protection that only applies when you send it: if the token was vaulted
    against a buyer and the `buyerId` doesn't match, the server returns
-   `404 payment_method_not_found`. If you omit it, nothing rejects the charge —
+   `404 payment_method_not_found`. If you omit it, nothing rejects the charge -
    which is exactly how a billing job that joins the wrong token to the wrong
    subscriber bills someone else's card. Tokens saved with no buyer on file are
    unrestricted.
@@ -104,7 +109,7 @@ Rules of thumb:
    Vault a reusable card with `tokens.create({ setupForFutureUse: "off_session" })`.
 
 4. **A return-URL signature is NOT proof of payment.** A declined payment is
-   signed just as authentically as an approved one — every one of these samples
+   signed just as authentically as an approved one - every one of these samples
    once rendered "Payment successful" on a decline for exactly that reason. Do
    not verify the redirect yourself, and do not try to verify it with a per-
    merchant `ss_*` secret: the redirect is signed with a platform-wide secret,
@@ -125,38 +130,63 @@ Rules of thumb:
      check" is not "they did not pay".
 
    Render `outcome.amount` (from the server), never `params.amount` from the
-   query string — the query string is buyer-controlled.
+   query string - the query string is buyer-controlled.
 
-## What the 2.x types cover
+5. **Sandbox test cards.** A sandbox runs on its payment provider's test
+   environment, which runs 3-D Secure on every card payment, so only these
+   cards work, with expiry `03/30` and CVC `100`:
+
+   | Card | What happens |
+   |---|---|
+   | `9000 1001 1111 1111` | Not enrolled in 3-D Secure: approves |
+   | `4111 1111 1110 1203` (Visa) / `5200 0000 0000 1203` (Mastercard) | 3-D Secure with no challenge: approves |
+   | `4111 1111 1118 1072` (Visa) / `5240 0000 0000 1072` (Mastercard) | 3-D Secure challenge: pass or fail |
+   | any card above at an order total of 2,000.12 (`amount: 200012`) | Declined by the card's issuer |
+
+   Common numbers such as `4242 4242 4242 4242` are declined. A card payment can
+   pause for 3-D Secure, so always send a return URL. If the merchant's dashboard
+   shows different test cards for their sandbox, those win. The same list is
+   published as data in `@vonpay/test-cards`, and the MCP server's
+   `list_test_cards` tool returns it (`@vonpay/checkout-mcp` 5.2.0 or later).
+
+## What the 3.x types cover
 
 The local type bridges the 0.9-era samples needed are no longer required:
 
-- `paymentMethod` is on `CreatePaymentIntentParams` since `2.0.0`;
-  `returnUrl` since `2.5.0` (so not on the `2.0.0` the lockfiles hold —
-  `npm update` to pick it up).
+- `paymentMethod`, `returnUrl`, `buyerId`, `mit`, `captureMethod` and
+  `sessionId` are typed on `CreatePaymentIntentParams`.
 - `PaymentIntent.nextAction` is typed as `PaymentIntentNextAction | null`,
   i.e. the structured `{ type: "redirect_to_url", redirectToUrl: { url } }`
   object (the SDK camel-cases the wire key `redirect_to_url`).
 - `payment_intent.*` events are members of the typed `WebhookEvent` union.
-- `mit`, `buyerId`, `captureMethod`, `sessionId` are all typed.
+- `minorUnitDigits(currency)` and `formatMinorUnits(amount, currency)` are
+  exported (since `3.0.0`): the number of decimals the API uses for a
+  currency, or `undefined` (never a guess) when the code is not a currency
+  the API knows or its decimals are still being confirmed. `checkout-nextjs`,
+  `checkout-express` and `platform-integrator-nextjs` format amounts with
+  `minorUnitDigits`; the browser-side code
+  in `checkout-embedded` and `checkout-paybylink-nextjs` carries a copy of
+  the same table, because the server SDK cannot run in a browser.
 
-Some samples still carry a small `ChargeParams` widening or an `as unknown`
-read of `nextAction` from that era. On 2.x they are redundant, not required —
-don't copy them into new code.
+None of the samples carry the old local type bridges any more; don't
+reintroduce them.
 
 ## Conventions when extending a sample
 
 - Keep files short and explicit; no hidden imports. Samples are written to be
   paste-friendly into an agent context.
-- Use the typed SDK surface — don't hand-roll HMAC or raw `fetch` for anything
+- Use the typed SDK surface - don't hand-roll HMAC or raw `fetch` for anything
   the SDK already does (sessions, intents, tokens, webhook verification, return
   confirmation).
 - Use sandbox keys (`vp_sk_test_*`) for development. `vp_pmt_test_*` tokens are
   sandbox-only.
+- Amounts are in minor units. Never divide or multiply by 100: JPY has 0
+  decimals and KWD has 3. Use the SDK's `minorUnitDigits`.
 - Pass an `idempotencyKey` on every create-style call (Node: the `RequestOptions`
   second argument; Python: the `idempotency_key=` keyword) so retries are safe.
-  Never derive it from an attempt counter — that turns a retry into a second
-  charge.
+  Never derive it from an attempt counter - that turns a retry into a second
+  charge. From 28 October 2026 the API refuses a payment-intent create
+  without one (`400 idempotency_key_required`).
 - Stay factual and leak-clean: no internal codenames, no dropped-vendor names,
   no internal infra/flag references. This is a public repo.
 
@@ -171,6 +201,6 @@ Sample bugs: open an issue on this repo.
 
 ## Docs
 
-- Quickstart — https://docs.vonpay.com/quickstart
-- SDK references — https://docs.vonpay.com/sdks
-- API / webhooks / errors / test cards — https://docs.vonpay.com/reference
+- Quickstart - https://docs.vonpay.com/quickstart
+- SDK references - https://docs.vonpay.com/sdks
+- API / webhooks / errors / test cards - https://docs.vonpay.com/reference

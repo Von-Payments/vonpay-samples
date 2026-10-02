@@ -1,5 +1,5 @@
 /**
- * Embedded checkout (VORA Mirror) — browser integration.
+ * Embedded checkout (Embedded Fields) — browser integration.
  *
  * Flow:
  *   1. Fetch the publishable key + amount from our server (/api/config).
@@ -41,7 +41,7 @@ async function main() {
   if (typeof window.Vora !== "function") {
     showStatus(
       "error",
-      "The VORA Mirror SDK failed to load from js.vonpay.com. Check your network and reload.",
+      "The Embedded Fields SDK failed to load from js.vonpay.com. Check your network and reload.",
     );
     return;
   }
@@ -91,7 +91,8 @@ async function main() {
       font: { family: "system-ui, sans-serif", size: "16px" },
       color: { text: "#1f2937", placeholder: "#9ca3af" },
     },
-    placeholder: { number: "4242 4242 4242 4242" },
+    // A neutral placeholder: a real buyer sees this too, so it is not a test card.
+    placeholder: { number: "1234 1234 1234 1234" },
   });
 
   let mounted;
@@ -201,21 +202,70 @@ function readError(err) {
   return String(err);
 }
 
+// ── Currency decimals ────────────────────────────────────────────────
+// The SAME table as `minorUnitDigits` in @vonpay/checkout-node (the API's own
+// decimals). It is copied here because this code also runs in the browser,
+// where the server SDK cannot be imported. Keep it identical to the SDK's.
+//
+// Real currency codes: active ISO 4217 codes that have a minor unit.
+const CURRENCY_CODES = new Set([
+  "AED", "AFN", "ALL", "AMD", "AOA", "ARS", "AUD", "AWG", "AZN", "BAM", "BBD",
+  "BDT", "BHD", "BIF", "BMD", "BND", "BOB", "BOV", "BRL", "BSD", "BTN", "BWP",
+  "BYN", "BZD", "CAD", "CDF", "CHE", "CHF", "CHW", "CLF", "CLP", "CNY", "COP",
+  "COU", "CRC", "CUP", "CVE", "CZK", "DJF", "DKK", "DOP", "DZD", "EGP", "ERN",
+  "ETB", "EUR", "FJD", "FKP", "GBP", "GEL", "GHS", "GIP", "GMD", "GNF", "GTQ",
+  "GYD", "HKD", "HNL", "HTG", "HUF", "IDR", "ILS", "INR", "IQD", "IRR", "ISK",
+  "JMD", "JOD", "JPY", "KES", "KGS", "KHR", "KMF", "KPW", "KRW", "KWD", "KYD",
+  "KZT", "LAK", "LBP", "LKR", "LRD", "LSL", "LYD", "MAD", "MDL", "MGA", "MKD",
+  "MMK", "MNT", "MOP", "MRU", "MUR", "MVR", "MWK", "MXN", "MXV", "MYR", "MZN",
+  "NAD", "NGN", "NIO", "NOK", "NPR", "NZD", "OMR", "PAB", "PEN", "PGK", "PHP",
+  "PKR", "PLN", "PYG", "QAR", "RON", "RSD", "RUB", "RWF", "SAR", "SBD", "SCR",
+  "SDG", "SEK", "SGD", "SHP", "SLE", "SOS", "SRD", "SSP", "STN", "SVC", "SYP",
+  "SZL", "THB", "TJS", "TMT", "TND", "TOP", "TRY", "TTD", "TWD", "TZS", "UAH",
+  "UGX", "USD", "USN", "UYI", "UYU", "UYW", "UZS", "VED", "VES", "VND", "VUV",
+  "WST", "XAD", "XAF", "XCD", "XCG", "XOF", "XPF", "YER", "ZAR", "ZMW", "ZWG",
+]);
+// Codes whose decimals are not settled yet (the API's table and ISO 4217
+// disagree, and Von Payments is confirming which one the payment processor
+// applies). Never guess money: these are treated as unknown.
+const DISPUTED = new Set([
+  "CLF", "IQD", "ISK", "LYD", "MGA", "UYI", "UYW",
+]);
+// The API's 0- and 3-decimal currencies; every other code is 2.
+const ZERO_DECIMAL = new Set([
+  "BIF", "CLP", "DJF", "GNF", "JPY", "KMF", "KRW", "MGA", "PYG", "RWF",
+  "UGX", "VND", "VUV", "XAF", "XOF", "XPF",
+]);
+const THREE_DECIMAL = new Set([
+  "BHD", "JOD", "KWD", "OMR", "TND",
+]);
+
+// Decimals the API uses for `code`, or null when it is not a real currency.
+function currencyDecimals(code) {
+  if (!CURRENCY_CODES.has(code)) return null;
+  if (DISPUTED.has(code)) return null;
+  if (ZERO_DECIMAL.has(code)) return 0;
+  if (THREE_DECIMAL.has(code)) return 3;
+  return 2;
+}
+
 // `minor` is in MINOR units, as the API sends it. Not every currency has 2
-// decimals (JPY has 0, KWD has 3), so ask the currency data instead of
-// dividing by 100.
+// decimals (JPY has 0, KWD has 3), so use the API's own decimals (above)
+// instead of dividing by 100 — and not Intl's, which disagree for some.
 function formatAmount(minor, currency) {
   if (typeof minor !== "number") return "";
   const code = (currency ?? "USD").toUpperCase();
-  let formatter;
-  try {
-    formatter = new Intl.NumberFormat(undefined, { style: "currency", currency: code });
-  } catch {
-    // Not a well-formed currency code (Intl throws). Show the raw minor units rather than guess.
+  const exponent = currencyDecimals(code);
+  if (exponent === null) {
+    // Not a currency code we know. Show the raw minor units rather than guess.
     return `${minor} ${code} (minor units)`;
   }
-  const exponent = formatter.resolvedOptions().maximumFractionDigits ?? 2;
-  return formatter.format(minor / 10 ** exponent);
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: code,
+    minimumFractionDigits: exponent,
+    maximumFractionDigits: exponent,
+  }).format(minor / 10 ** exponent);
 }
 
 function escapeHtml(value) {

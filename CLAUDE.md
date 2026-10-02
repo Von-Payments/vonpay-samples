@@ -1,9 +1,9 @@
-# CLAUDE.md — working in this repo
+# CLAUDE.md - working in this repo
 
 This is the **public mirror** of the Von Payments sample apps. Read this before
 editing anything.
 
-## Ownership — what is edited here vs. upstream
+## Ownership - what is edited here vs. upstream
 
 | Path | Owner | Edit here? |
 |---|---|---|
@@ -19,7 +19,7 @@ only have access to this repo, open an issue.
   (Node) and `py_compile` (Python). No functional tests.
 - Leak check (`.github/workflows/leak-check.yml`): ticket IDs and secret-key
   material only. The full-glossary leak scan runs from the SDK repository on a
-  schedule, not here — this repo carries no leak/drift rule files on purpose.
+  schedule, not here - this repo carries no leak/drift rule files on purpose.
 - Renovate is disabled here (`renovate.json`): bumps land upstream.
 
 ## Database projects
@@ -30,5 +30,5 @@ N/A. This repo has no database, no migrations and no replication; the DB-parity 
 
 `AGENTS.md` and `llms.txt` are read by integrators' coding agents. Every
 version, event name, field name and method in them must match the samples'
-pins/lockfiles and the published SDK type definitions — check, don't recall.
+pins/lockfiles and the published SDK type definitions - check, don't recall.
 They carry a "checked on <date>" line; update it when you re-verify.

@@ -3,7 +3,7 @@
 Server-side payment intent flow: **authorize -> capture -> partial refund**, plus an idempotency replay. Single-script Python demo against the Vonpay Checkout API.
 
 - **Stack:** Python 3.9+, type-hinted
-- **SDK:** [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) 2.x - 2.11 or later (`>=2.11,<3`)
+- **SDK:** [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) 3.x - 3.4 or later (`>=3.4,<4`)
 - **Best for:** B2B / invoicing flows, headless billing where the merchant server drives the lifecycle (no hosted checkout)
 
 ## What it demonstrates
@@ -62,7 +62,7 @@ The two intent IDs in `idempotency-replay` are identical because the server shor
 | File | What it does |
 |---|---|
 | `main.py` | The sample - runnable end-to-end |
-| `requirements.txt` | `vonpay-checkout>=2.11,<3` + `python-dotenv` for `.env` loading |
+| `requirements.txt` | `vonpay-checkout>=3.4,<4` + `python-dotenv` for `.env` loading |
 | `.env.example` | Copy to `.env` and paste your sandbox key |
 
 ## Configuration
@@ -101,7 +101,7 @@ Each step is wrapped in `try`/`except VonPayError`. `VonPayError` carries:
 - Move `VON_PAY_SECRET_KEY` into your secret manager (AWS Secrets Manager, Vault, Doppler, etc.). Never commit it.
 - Treat `Idempotency-Key` as required, not optional. Use a deterministic value tied to the upstream order (e.g. `f"order:{order_id}:authorize"`) so retries collapse cleanly.
 - Read `vonpay.capabilities.get()` once at startup - it tells you whether `void_after_capture` is `rerouted_to_refund` (most processors), so you can branch between void and refund without round-tripping a failed call.
-- Inspect `intent.status` after `create` - your code should handle the decline path, not just the happy path. In test mode the order total decides the outcome, not the card: an ordinary total approves, and specific totals decline (for example `200011`, i.e. 2,000.11, returns `insufficient_funds`). The full list is in [Test mode](https://docs.vonpay.com/reference/test-cards).
+- Inspect `intent.status` after `create` - your code should handle the decline path, not just the happy path. In test mode the order total decides a decline, not the card: an ordinary total approves, and an order total of `200012` (2,000.12) is declined by the card's issuer. Save the card with one of your sandbox's test cards (`9000 1001 1111 1111` approves, expiry `03/30`, CVC `100`; common numbers such as `4242 4242 4242 4242` are declined). See [Test mode](https://docs.vonpay.com/reference/test-cards).
 
 ## Reference docs
 
@@ -111,4 +111,4 @@ Each step is wrapped in `try`/`except VonPayError`. `VonPayError` carries:
 
 ## Tested against
 
-`vonpay-checkout` 2.x - `python -m py_compile` clean; live sandbox run needs a `vp_sk_test_...` key.
+`vonpay-checkout` 3.x - `python -m py_compile` clean; live sandbox run needs a `vp_sk_test_...` key.
