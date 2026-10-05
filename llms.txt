@@ -105,7 +105,6 @@ assuming. "Current" above is a point-in-time reading.
 5. Sandbox test cards.
    A sandbox runs 3-D Secure on every card payment, so only the payment
    provider's test cards work, with expiry 03/30 and CVC 100:
-   9000 1001 1111 1111 (not enrolled, approves);
    4111 1111 1110 1203 / Mastercard 5200 0000 0000 1203 (3-D Secure, no
    challenge, approves); 4111 1111 1118 1072 / Mastercard 5240 0000 0000 1072
    (3-D Secure challenge, pass or fail). An order total of 2,000.12

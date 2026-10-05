@@ -81,7 +81,7 @@ done { savedCard: 'vp_pmt_test_...', anchorTransactionId: 'vpi_test_...', renewa
 
 > **Branch on the capability matrix.** `supportedOperations.mit` reports what your account's payment provider supports - on a test key too, since a sandbox reports its own provider's matrix. When it is `false` the sample stops cleanly after the anchor charge rather than faking a renewal. This is exactly how your code should behave - never hard-code per-processor assumptions.
 >
-> In test mode the order total decides a decline, not the card: this sample's 29.99 approves, and 2,000.12 (`200012`) is declined by the card's issuer. Save the card with one of your sandbox's test cards: `9000 1001 1111 1111` (approves with no 3-D Secure step), expiry `03/30`, CVC `100`. Common numbers such as `4242 4242 4242 4242` are declined (see [Test mode](https://docs.vonpay.com/reference/test-cards)).
+> In test mode the order total decides a decline, not the card: this sample's 29.99 approves, and 2,000.12 (`200012`) is declined by the card's issuer. Save the card with one of your sandbox's test cards: `5200 0000 0000 1203` (approves, 3-D Secure with no challenge), expiry `03/30`, CVC `100`. Common numbers such as `4242 4242 4242 4242` are declined (see [Test mode](https://docs.vonpay.com/reference/test-cards)).
 
 ## Scripts
 

@@ -101,7 +101,7 @@ Each step is wrapped in `try`/`except VonPayError`. `VonPayError` carries:
 - Move `VON_PAY_SECRET_KEY` into your secret manager (AWS Secrets Manager, Vault, Doppler, etc.). Never commit it.
 - Treat `Idempotency-Key` as required, not optional. Use a deterministic value tied to the upstream order (e.g. `f"order:{order_id}:authorize"`) so retries collapse cleanly.
 - Read `vonpay.capabilities.get()` once at startup - it tells you whether `void_after_capture` is `rerouted_to_refund` (most processors), so you can branch between void and refund without round-tripping a failed call.
-- Inspect `intent.status` after `create` - your code should handle the decline path, not just the happy path. In test mode the order total decides a decline, not the card: an ordinary total approves, and an order total of `200012` (2,000.12) is declined by the card's issuer. Save the card with one of your sandbox's test cards (`9000 1001 1111 1111` approves, expiry `03/30`, CVC `100`; common numbers such as `4242 4242 4242 4242` are declined). See [Test mode](https://docs.vonpay.com/reference/test-cards).
+- Inspect `intent.status` after `create` - your code should handle the decline path, not just the happy path. In test mode the order total decides a decline, not the card: an ordinary total approves, and an order total of `200012` (2,000.12) is declined by the card's issuer. Save the card with one of your sandbox's test cards (`5200 0000 0000 1203` approves, expiry `03/30`, CVC `100`; common numbers such as `4242 4242 4242 4242` are declined). See [Test mode](https://docs.vonpay.com/reference/test-cards).
 
 ## Reference docs
 

@@ -129,7 +129,7 @@ Create a Von Payments checkout session for $19.99 USD in the US.
 Give me the checkout URL and the session ID.
 ```
 
-The agent calls `vonpay_checkout_create_session`, returns the `checkoutUrl` and `id`. Open the URL in a browser and pay with a [test card](#test-cards), for example `9000 1001 1111 1111`, expiry `03/30`, CVC `100`.
+The agent calls `vonpay_checkout_create_session`, returns the `checkoutUrl` and `id`. Open the URL in a browser and pay with a [test card](#test-cards), for example `5200 0000 0000 1203`, expiry `03/30`, CVC `100`.
 
 ### Run the full lifecycle
 ```
@@ -164,7 +164,6 @@ Your sandbox runs on its payment provider's test environment, which runs 3-D Sec
 
 | Card | What happens |
 |---|---|
-| `9000 1001 1111 1111` | Not enrolled in 3-D Secure: approves |
 | `4111 1111 1110 1203` (Visa) / `5200 0000 0000 1203` (Mastercard) | 3-D Secure with no challenge: approves |
 | `4111 1111 1118 1072` (Visa) / `5240 0000 0000 1072` (Mastercard) | 3-D Secure challenge: you choose pass or fail |
 | any card above at an order total of 2,000.12 (`amount: 200012`) | Declined by the card's issuer |
