@@ -57,7 +57,7 @@ Open `http://localhost:3000`:
 2. Click **Charge** on a customer row
 3. The browser hits `/api/charge` with the customer id only. The route looks up Acme's keys and the customer's price on the server, and creates a session. The browser never sends an amount - anything a browser sends can be edited, so the price must come from your own records
 4. You're redirected to the Von Payments hosted checkout
-5. Complete with a sandbox test card: `9000 1001 1111 1111`, expiry `03/30`, CVC `100` (approves). Your sandbox runs 3-D Secure on every card payment, so only the payment provider's 3-D Secure test cards work; common numbers such as `4242 4242 4242 4242` are declined. For a challenge use `4111 1111 1118 1072`; to test a decline, give the customer a price of 2,000.12. [Test mode](https://docs.vonpay.com/reference/test-cards)
+5. Complete with a sandbox test card: `5200 0000 0000 1203`, expiry `03/30`, CVC `100` (3-D Secure with no challenge: approves). Your sandbox runs 3-D Secure on every card payment, so only the payment provider's 3-D Secure test cards work; common numbers such as `4242 4242 4242 4242` are declined. For a challenge use `4111 1111 1118 1072`; to test a decline, give the customer a price of 2,000.12. [Test mode](https://docs.vonpay.com/reference/test-cards)
 6. Return to `/tenants/tenant_a/confirm` - the page re-reads the session from the API using **Acme's** own secret key, not the other tenants'. ⚠️ It does NOT verify the return signature: that signature uses a platform-wide secret no tenant holds, so a per-tenant check could only ever fail. The per-tenant isolation here comes from the API key, which is the stronger guarantee
 
 ### 3. Test webhooks (optional)

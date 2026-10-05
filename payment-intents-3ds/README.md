@@ -67,7 +67,6 @@ Whether the bank challenges is decided by your sandbox's payment provider test e
 
 | Card | What happens |
 |---|---|
-| `9000 1001 1111 1111` | Not enrolled in 3-D Secure: approves |
 | `4111 1111 1110 1203` (Visa) / `5200 0000 0000 1203` (Mastercard) | 3-D Secure with no challenge: approves |
 | `4111 1111 1118 1072` (Visa) / `5240 0000 0000 1072` (Mastercard) | 3-D Secure challenge: you choose pass or fail |
 | any card above at an order total of 2,000.12 (`200012`) | Declined by the card's issuer |

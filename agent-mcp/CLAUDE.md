@@ -62,7 +62,7 @@ Available under the `vonpay_checkout_*` prefix:
 
 `list_test_cards` (checkout-mcp 5.2.0 or later) returns the payment provider's sandbox cards: one that approves, one that passes 3-D Secure with no challenge, one that shows a challenge. Expiry 03/30, CVC 100; an order total of 2000.12 declines; a return URL is required.
 
-**Test cards.** A sandbox runs 3-D Secure on every card payment, so only the payment provider's 3-D Secure test cards work, with expiry `03/30` and CVC `100`: `9000 1001 1111 1111` (not enrolled, approves), `4111 1111 1110 1203` (3-D Secure with no challenge, approves), `4111 1111 1118 1072` (3-D Secure challenge, pass or fail). Common numbers such as `4242 4242 4242 4242` are declined. An order total of 2,000.12 (`amount: 200012`) declines any of them. Always send a return URL: a card payment can pause for 3-D Secure.
+**Test cards.** A sandbox runs 3-D Secure on every card payment, so only the payment provider's 3-D Secure test cards work, with expiry `03/30` and CVC `100`: `4111 1111 1110 1203` / `5200 0000 0000 1203` (3-D Secure with no challenge, approves), `4111 1111 1118 1072` (3-D Secure challenge, pass or fail). Common numbers such as `4242 4242 4242 4242` are declined. An order total of 2,000.12 (`amount: 200012`) declines any of them. Always send a return URL: a card payment can pause for 3-D Secure.
 
 Each tool's input is validated by Zod; errors include the same `llmHint` + `nextAction` fields as the SDK.
 
