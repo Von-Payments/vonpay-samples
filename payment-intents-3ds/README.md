@@ -27,7 +27,7 @@ The intent is created with `captureMethod: "manual"` so a 3DS success lands on `
 Everything this sample sends and reads is on the SDK's typed surface - `paymentMethod` and `returnUrl` on `CreatePaymentIntentParams`, and `nextAction` typed as `PaymentIntentNextAction | null`. Two details are worth knowing:
 
 1. **The SDK camelCases response keys.** The API wire shape is `{ type: "redirect_to_url", redirect_to_url: { url } }`, but the SDK returns it as `nextAction.redirectToUrl.url`. Reading `nextAction.redirect_to_url.url` gives `undefined`. (The `type` is a string *value*, not a key, so it stays `"redirect_to_url"`.) The sample branches on `type` in `extractRedirectUrl`, so a future `next_action` type can't silently break the redirect.
-2. **`nextAction` is only on the response that creates the payment.** It is not persisted, so a later read or an idempotent replay will not carry it. Redirect from the create response.
+2. **Redirect from the create response, and re-read if you lost it.** `nextAction` arrives on the response that creates the payment. If that response is lost (a timeout, a crash), `vonpay.paymentIntents.retrieve(id)` returns the same `nextAction` for as long as the payment is still `requires_action`, with an `issuedAt` time saying when the link was issued. Check it before sending a buyer: how long a challenge link stays usable is set by the payment provider, and an old link may no longer work.
 
 ## Setup
 

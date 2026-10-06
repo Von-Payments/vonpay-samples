@@ -85,9 +85,10 @@ const savedCardBuyerId = process.env.VON_PAY_BUYER_ID?.trim() || undefined;
 // `"redirect_to_url"`. We branch on `type` so a future action type can't
 // silently break the redirect.
 //
-// ⚠️ Capture it from THIS response. `nextAction` is returned only on the call
-// that creates the payment; it is not persisted, so a later read or an
-// idempotent replay will not carry it.
+// Redirect from THIS response. If it is ever lost (a timeout, a crash),
+// `vonpay.paymentIntents.retrieve(id)` returns the same `nextAction` while the
+// payment is still `requires_action`, with an `issuedAt` time — check that
+// before sending a buyer, since an old challenge link may no longer work.
 function extractRedirectUrl(intent: PaymentIntent): string | null {
   const action = intent.nextAction;
   if (action?.type !== "redirect_to_url") return null;
