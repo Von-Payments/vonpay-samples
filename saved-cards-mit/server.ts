@@ -135,9 +135,12 @@ async function main(): Promise<void> {
       id: token.id,
       status: token.status,
       setupForFutureUse: token.setupForFutureUse,
+      // Each card field can be null: the details come from the payment
+      // provider, and when they cannot be read the card is still saved but
+      // nothing is filled in for you. Show "unknown" instead of "null".
       card: token.card
-        ? `${token.card.brand} •••• ${token.card.last4} (${token.card.expMonth}/${token.card.expYear})`
-        : undefined,
+        ? `${token.card.brand ?? "unknown brand"} •••• ${token.card.last4 ?? "unknown"} (${token.card.expMonth ?? "??"}/${token.card.expYear ?? "????"})`
+        : "unknown",
     });
   } catch (err) {
     logError("tokens.create", err);
