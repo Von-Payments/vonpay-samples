@@ -36,7 +36,13 @@ const apiKey = process.env.VON_PAY_SECRET_KEY!;
 // the webhook endpoint. This is NOT your API key — verifying with the API key
 // will fail against real production deliveries.
 const webhookSecret = process.env.VON_PAY_WEBHOOK_SECRET!;
-const vonpay = new VonPayCheckout(apiKey);
+// The SDK targets production by default; a `vp_sk_test_*` key runs in sandbox
+// mode there (no separate host). Override VON_PAY_BASE_URL only if support
+// directs you elsewhere.
+const baseUrl =
+  process.env.VON_PAY_BASE_URL?.replace(/\/+$/, "") ??
+  "https://checkout.vonpay.com";
+const vonpay = new VonPayCheckout({ apiKey, baseUrl });
 
 // Capture the RAW body for the webhook route (a Buffer, byte-faithful) — the
 // HMAC must be computed over the exact bytes Von Payments signed, so this must

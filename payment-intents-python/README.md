@@ -3,7 +3,7 @@
 Server-side payment intent flow: **authorize -> capture -> partial refund**, plus an idempotency replay. Single-script Python demo against the Vonpay Checkout API.
 
 - **Stack:** Python 3.9+, type-hinted
-- **SDK:** [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) 3.x - 3.4 or later (`>=3.4,<4`)
+- **SDK:** [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) 3.x - 3.7 or later (`>=3.7,<4`)
 - **Best for:** B2B / invoicing flows, headless billing where the merchant server drives the lifecycle (no hosted checkout)
 
 ## What it demonstrates
@@ -62,7 +62,7 @@ The two intent IDs in `idempotency-replay` are identical because the server shor
 | File | What it does |
 |---|---|
 | `main.py` | The sample - runnable end-to-end |
-| `requirements.txt` | `vonpay-checkout>=3.4,<4` + `python-dotenv` for `.env` loading |
+| `requirements.txt` | `vonpay-checkout>=3.7,<4` + `python-dotenv` for `.env` loading |
 | `.env.example` | Copy to `.env` and paste your sandbox key |
 
 ## Configuration

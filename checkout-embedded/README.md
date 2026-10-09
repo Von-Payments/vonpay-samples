@@ -8,7 +8,7 @@ without sending the buyer to a hosted checkout page.
 - **Stack:** Node 20+ / Express 5 / TypeScript (server, run via `tsx`) +
   a static HTML/JS page (browser)
 - **Von Payments SDKs:**
-  - Server: `@vonpay/checkout-node` 3.x - 3.4.0 or later (`^3.4.0`)
+  - Server: `@vonpay/checkout-node` 3.x - 3.7.0 or later (`^3.7.0`)
   - Browser: the Embedded Fields SDK, loaded from
     `https://js.vonpay.com/v1/vora.js` (CDN `<script>` - there is no public
     npm package to install)

@@ -16,7 +16,14 @@ API_KEY = os.environ["VON_PAY_SECRET_KEY"]
 WEBHOOK_SECRET = os.environ["VON_PAY_WEBHOOK_SECRET"]
 BASE_URL = os.environ["BASE_URL"].rstrip("/")
 
-checkout = VonPayCheckout(API_KEY)
+# The SDK targets production by default; a ``vp_sk_test_*`` key runs in sandbox
+# mode there (no separate host). Override VON_PAY_BASE_URL only if support
+# directs you elsewhere. (BASE_URL above is THIS app's own address.)
+VON_PAY_BASE_URL = (
+    os.environ.get("VON_PAY_BASE_URL", "").rstrip("/") or "https://checkout.vonpay.com"
+)
+
+checkout = VonPayCheckout(API_KEY, base_url=VON_PAY_BASE_URL)
 
 
 @app.get("/")

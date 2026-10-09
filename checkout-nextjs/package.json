@@ -8,7 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
-    "@vonpay/checkout-node": "^3.4.0",
+    "@vonpay/checkout-node": "^3.7.0",
     "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
