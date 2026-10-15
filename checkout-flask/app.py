@@ -145,15 +145,14 @@ def success():
     # else. `confirm_return` answers "did this session succeed?" for ANY
     # session on your account. Without this check, a success URL copied from
     # another paid order of your shop (a cheap one, say) would show a success
-    # page for this one. So the session must be the one this browser started
-    # (the cookie set at /checkout) and must have an order record here.
-    session_id = params.get("session", "")
-    order = ORDERS_BY_SESSION.get(session_id) if session_id else None
-    if (
-        not session_id
-        or session_id != request.cookies.get(CHECKOUT_COOKIE)
-        or order is None
-    ):
+    # page for this one. So start from the session this browser started (the
+    # cookie set at /checkout) and its order record here, and hand both to
+    # `confirm_return` below: `expected_session_id` refuses a return that names
+    # any other session, and `expected_amount` + `expected_currency` refuse a
+    # session paid for a different figure.
+    started_session_id = request.cookies.get(CHECKOUT_COOKIE, "")
+    order = ORDERS_BY_SESSION.get(started_session_id) if started_session_id else None
+    if order is None:
         return NOT_MATCHED_PAGE, 400
 
     # `confirm_return` verifies the signature AND confirms server-side that the
@@ -182,6 +181,9 @@ def success():
             expected_success_url=f"{BASE_URL}/success",
             expected_key_mode=expected_mode,
             max_age_seconds=600,
+            expected_session_id=started_session_id,
+            expected_amount=order["amount"],
+            expected_currency=order["currency"],
         )
     except VonPayError as e:
         # The lookup failed — we could not check. That is NOT "they did not
@@ -198,6 +200,18 @@ def success():
             503,
         )
 
+    # Not this order's payment: the return names another session (or none), or
+    # the session was for a different amount or currency. Checked before the
+    # status, so a paid session for another figure never reads as paid here.
+    if outcome.reason in ("missing_session", "session_mismatch", "amount_mismatch"):
+        if outcome.reason == "amount_mismatch":
+            app.logger.error(
+                "Return for order %s: the session's amount does not match the "
+                "order; not shown as paid.",
+                order["order_id"],
+            )
+        return NOT_MATCHED_PAGE, 400
+
     # ⚠️ IN FLIGHT is not DECLINED. On the 3-D Secure path the buyer is returned
     # here BEFORE the charge settles, so this is the ordinary case there — not
     # an edge case. Telling this buyer their payment failed is how they end up
@@ -213,19 +227,6 @@ def success():
     if not outcome.paid:
         status = escape(outcome.status or "unknown")
         return f"<h1>Payment not completed</h1><p>Status: {status}</p>", 402
-
-    # The session was paid. Now check it paid for THIS order: the amount and
-    # currency the server charged must be the ones your order record holds.
-    if (
-        outcome.amount != order["amount"]
-        or (outcome.currency or "").upper() != order["currency"].upper()
-    ):
-        app.logger.error(
-            "Return for order %s: the paid amount does not match the order; "
-            "not shown as paid.",
-            order["order_id"],
-        )
-        return NOT_MATCHED_PAGE, 400
 
     # ⚠️ Displaying a confirmation is safe to repeat. FULFILLING is not — this
     # URL can be replayed, and the status keeps reading "succeeded" every time.

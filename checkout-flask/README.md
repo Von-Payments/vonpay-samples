@@ -3,7 +3,7 @@
 Minimal end-to-end reference integration on Flask 3: create a session, redirect the buyer to `checkout.vonpay.com`, confirm the outcome server-side on `/success`, and verify HMAC webhooks on `/webhooks`. Python equivalent of the Express and Next.js samples.
 
 - **Stack:** Flask 3+, Python 3.9+
-- **Von Payments SDK:** [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) 3.x - 3.7 or later (`>=3.7,<4`)
+- **Von Payments SDK:** [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) 4.x (`>=4.0,<5`)
 - **What it demonstrates:** session creation with an idempotency key, server-side return confirmation, HMAC webhook verification with raw-body parsing
 
 ## 5-minute setup
@@ -57,11 +57,11 @@ The `sessions.create()` call sends an idempotency key derived from the order id 
 **Match the return to YOUR order before showing success.** `confirm_return()` tells you whether *a* session of your account was paid - any session. On its own, a success link copied from another paid order of your shop (a cheap one, say) would show a success page for this one. So `/checkout` records which order each session is for, on the server (here an in-memory dict; use your database), and sets an HttpOnly cookie naming the session. `/success` shows a payment only when the returned session is the one this browser started, has an order record, and was paid the order's amount and currency. Anything else gets a neutral "we couldn't match this payment" page (HTTP 400) - not "payment failed", and no "pay again". This follows the usual practice for hosted checkouts: look your order up by the returned session id in your own records, never trust the URL alone, and fulfil from the webhook.
 
 - **One checkout per browser at a time.** The cookie holds the latest session this browser started. If a buyer opens two checkouts in two tabs and pays the first, its return gets the "couldn't match" page: the payment is still safe and the webhook still fulfils it. A real shop ties the return to the buyer's account or cart, or keeps every open session for the browser.
-- **The SDK can do this check for you.** An upcoming release of the SDK adds `expected_session_id` and `expected_amount` + `expected_currency` to `confirm_return()`; a mismatch then comes back as not paid. This sample will switch to them once that release is published.
+- **The SDK can do this check for you.** This sample reads the session id from the cookie and the order record from your server, then passes them to `confirm_return()` as `expected_session_id` and `expected_amount` + `expected_currency` (SDK 4.0.0+). A return that names another session, or a session for a different amount or currency, comes back as not paid (`reason == "session_mismatch"` / `"amount_mismatch"`) and gets the "couldn't match" page. Keep the order record either way: it is where the expected values come from.
 
 Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header - there is no separate timestamp header). `checkout.webhooks.construct_event(raw_body, signature_header, webhook_secret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent`. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) - not your API key.
 
-**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `True` the handler returns 2xx and does nothing else (the field exists from SDK 2.7; this sample's `>=3.7,<4` covers it).
+**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `True` the handler returns 2xx and does nothing else (the field exists from SDK 2.7; this sample's `>=4.0,<5` covers it).
 
 The webhook handler branches on `event.type`. `charge.succeeded` means the buyer actually paid - do **not** fulfill on `charge.failed`. Unknown event types are acked (200) with no action. ⚠️ Do **not** subscribe to `session.succeeded`: the server emits it internally but it is not in the merchant subscription catalog, which silently drops unknown keys and returns success - an endpoint subscribed to it receives nothing, forever.
 

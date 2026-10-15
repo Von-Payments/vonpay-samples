@@ -32,7 +32,9 @@ export default async function ConfirmPage({
   // paid link (a cheap one, say) would show "Payment successful" here for a
   // link nobody paid. A pay link is opened from an email or a QR code, so
   // there is no browser cookie to check; the link record on your server is
-  // the binding.
+  // the binding. Its amount and currency go to `confirmReturn` below
+  // (`expectedAmount` + `expectedCurrency`), which refuses a session paid for
+  // a different figure.
   const sessionId = typeof params.session === "string" ? params.session : "";
   const link = sessionId ? getLinkBySessionId(sessionId) : undefined;
   if (!link) {
@@ -67,6 +69,8 @@ export default async function ConfirmPage({
       expectedSuccessUrl: `${baseUrl}/confirm`,
       expectedKeyMode: apiKey.includes("_test_") ? "test" : "live",
       maxAgeSeconds: 600,
+      expectedAmount: link.amount,
+      expectedCurrency: link.currency,
     });
   } catch (err) {
     // Log it: a revoked key would otherwise show every buyer "refresh in a
@@ -89,6 +93,16 @@ export default async function ConfirmPage({
         </p>
       </main>
     );
+  }
+
+  // Not this link's payment: the session was for a different amount or
+  // currency. Checked before the status, so a paid session for another figure
+  // never reads as paid here.
+  if (outcome.reason === "amount_mismatch") {
+    console.error(
+      `Return for pay link ${link.id}: the session's amount does not match the link; not shown as paid.`,
+    );
+    return <NotMatched />;
   }
 
   // ⚠️ IN FLIGHT is not DECLINED. On the 3-D Secure path the buyer is returned
@@ -122,24 +136,14 @@ export default async function ConfirmPage({
     );
   }
 
-  // The session was paid. Now check it paid for THIS link: the amount and
-  // currency the server charged must be the ones the link record holds.
-  if (
-    outcome.amount !== link.amount ||
-    (outcome.currency ?? "").toUpperCase() !== link.currency.toUpperCase()
-  ) {
-    console.error(
-      `Return for pay link ${link.id}: the paid amount does not match the link; not shown as paid.`,
-    );
-    return <NotMatched />;
-  }
-
   // ⚠️ Render the SERVER's amount, never `amount` from the redirect query
   // string. The query string is buyer-controlled and unauthenticated: anyone
   // can complete a real 1-unit payment and then edit the URL to show a
   // confirmation for any figure they like. `outcome.amount` came back from the
-  // authenticated session read (and was just checked against the link).
-  const displayAmount = formatMinorAmount(outcome.amount, link.currency);
+  // authenticated session read, and `confirmReturn` already checked it equals
+  // the link's amount (`expectedAmount`). A paid outcome always carries it.
+  const displayAmount =
+    outcome.amount === undefined ? "N/A" : formatMinorAmount(outcome.amount, link.currency);
 
   // ⚠️ Displaying a confirmation is safe to repeat. FULFILLING is not — this URL
   // can be replayed, and the status keeps reading "succeeded" every time. Record

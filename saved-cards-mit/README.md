@@ -3,7 +3,7 @@
 Server-side **save-a-card, then rebill it** flow: vault a reusable card, run the cardholder-initiated anchor charge, then fire a **merchant-initiated (MIT)** recurring renewal against the card on file. Single-script Node.js demo against the Vonpay Checkout API.
 
 - **Stack:** Node 20+, TypeScript strict, ESM
-- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 3.x - 3.7.0 or later (`^3.7.0`)
+- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 4.x (`^4.0.0`)
 - **Best for:** Subscriptions, recurring billing, scheduled installments, retry/dunning loops - anywhere you charge a saved card while the buyer is not present.
 
 ## What it demonstrates
@@ -197,4 +197,4 @@ If the token isn't vaulted off-session, the MIT charge would be rejected with `p
 
 ## Tested against
 
-`@vonpay/checkout-node` 3.x - typecheck with `npm run typecheck`.
+`@vonpay/checkout-node` 4.x - typecheck with `npm run typecheck`.

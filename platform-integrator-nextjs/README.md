@@ -3,7 +3,7 @@
 Multi-tenant reference integration for platforms (CRMs, subscription engines, ISVs) that resell Von Payments to their own merchants. Demonstrates the per-tenant credential pattern: each merchant onboarded to the platform has their own Von Payments API key and webhook signing secret stored on the platform side; the platform looks up the right credentials at charge time and at webhook time.
 
 - **Stack:** Next.js 16 / React 19 / TypeScript strict (Node.js 20.9 or later)
-- **Von Payments SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 3.x - 3.7.0 or later (`^3.7.0`)
+- **Von Payments SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 4.x (`^4.0.0`)
 - **Best for:** subscription-billing CRMs, headless commerce platforms, ISV cart products, marketplace operators - anywhere your product has many "merchants" and each wants to plug Von Payments in as their gateway
 
 ## What it demonstrates
@@ -60,7 +60,7 @@ Open `http://localhost:3000`:
 5. Complete with a sandbox test card: `5200 0000 0000 1203`, expiry `03/30`, CVC `100` (3-D Secure with no challenge: approves). Your sandbox runs 3-D Secure on every card payment, so only the payment provider's 3-D Secure test cards work; common numbers such as `4242 4242 4242 4242` are declined. For a challenge use `4111 1111 1118 1072`; to test a decline, give the customer a price of 2,000.12. [Test mode](https://docs.vonpay.com/reference/test-cards)
 6. Return to `/tenants/tenant_a/confirm` - the page re-reads the session from the API using **Acme's** own secret key, not the other tenants'. ⚠️ It does NOT verify the return signature: that signature uses a platform-wide secret no tenant holds, so a per-tenant check could only ever fail. The per-tenant isolation here comes from the API key, which is the stronger guarantee. Before it shows anything as paid, the page also matches the return to an order YOUR platform created: `/api/charge` records which tenant, order and price each session is for (`lib/orders.ts`, in memory here; use your order table), and the confirm page requires that record, for this tenant, at the same amount and currency. Otherwise a success link copied from another paid order of the same tenant would show "Payment captured" for this one; instead it gets a neutral "we couldn't match this payment" page - not "payment failed", and no "pay again"
 
-   - **The SDK can do this check for you.** An upcoming release of the SDK adds `expectedSessionId` and `expectedAmount` + `expectedCurrency` to `confirmReturn()`; a mismatch then comes back as not paid. This sample will switch to them once that release is published.
+   - **The SDK can do this check for you.** This sample passes the order record's amount and currency to `confirmReturn()` as `expectedAmount` + `expectedCurrency` (SDK 4.0.0+); a session for a different amount or currency comes back as not paid (`reason: "amount_mismatch"`) and gets the "couldn't match" page. The order record (looked up by the returned session, for this tenant) stays the binding; there is no cookie to pass as `expectedSessionId`.
 
 ### 3. Test webhooks (optional)
 
@@ -123,7 +123,7 @@ The signature is verified using the **tenant's** per-endpoint `whsec_*` secret (
 
 `constructEvent` takes **three** arguments - `(rawBody, signatureHeader, whsec)`. The signed timestamp lives inside the `x-vonpay-signature` header (`t=<unix>,v1=<hex>`); there is no separate timestamp header.
 
-**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^3.7.0` covers it).
+**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^4.0.0` covers it).
 
 ### Idempotent event processing
 
@@ -153,4 +153,4 @@ Webhook deliveries are retried on failure. The receiver must dedupe. The sample 
 
 ## Tested against
 
-`@vonpay/checkout-node` 3.x - typecheck with `npm run typecheck`.
+`@vonpay/checkout-node` 4.x - typecheck with `npm run typecheck`.

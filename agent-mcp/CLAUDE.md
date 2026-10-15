@@ -12,8 +12,8 @@ This project uses [Von Payments](https://vonpay.com) for hosted checkout, embedd
 
 ## SDKs
 
-- **Node:** `@vonpay/checkout-node` 3.x (npm; check `npm view @vonpay/checkout-node version` for latest)
-- **Python:** `vonpay-checkout` 3.x (PyPI; check `pip index versions vonpay-checkout` for latest)
+- **Node:** `@vonpay/checkout-node` 4.x (npm; check `npm view @vonpay/checkout-node version` for latest)
+- **Python:** `vonpay-checkout` 4.x (PyPI; check `pip index versions vonpay-checkout` for latest)
 - **Browser fields:** `https://js.vonpay.com/v1/vora.js` (auto-update) or `https://js.vonpay.com/vX.Y.Z/vora.js` (pinned - the newest version is named under `channels.v1.current` in `https://js.vonpay.com/integrity.json`)
 - **React wrapper:** `@vonpay/vora-react` - provider + hook for the browser fields (not yet published to npm)
 - **MCP server (for agents):** `@vonpay/checkout-mcp` 5.x - adds 12 tools to any MCP-compatible client (Claude Code, Cursor, Claude Desktop, Continue.dev, Windsurf, custom runtimes). Same surface as the SDK.

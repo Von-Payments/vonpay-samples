@@ -191,11 +191,14 @@ app.get("/success", async (req, res) => {
   // `confirmReturn` answers "did this session succeed?" for ANY session on
   // your account. Without this check, a success URL copied from another paid
   // order of your shop (a cheap one, say) would show "Payment successful" for
-  // this one. So the session must be the one this browser started (the cookie
-  // set at /checkout) and must have an order record on your server.
-  const sessionId = typeof params.session === "string" ? params.session : "";
+  // this one. So start from the session this browser started (the cookie set
+  // at /checkout) and its order record on your server, and hand both to
+  // `confirmReturn` below: `expectedSessionId` refuses a return that names any
+  // other session, and `expectedAmount` + `expectedCurrency` refuse a session
+  // paid for a different figure.
+  const sessionId = readCookie(req.headers.cookie, CHECKOUT_COOKIE) ?? "";
   const order = sessionId ? ordersBySession.get(sessionId) : undefined;
-  if (!sessionId || sessionId !== readCookie(req.headers.cookie, CHECKOUT_COOKIE) || !order) {
+  if (!order) {
     res.status(400).send(NOT_MATCHED_PAGE);
     return;
   }
@@ -225,6 +228,9 @@ app.get("/success", async (req, res) => {
       expectedSuccessUrl: `${appUrl}/success`,
       expectedKeyMode: apiKey.includes("_test_") ? "test" : "live",
       maxAgeSeconds: 600,
+      expectedSessionId: sessionId,
+      expectedAmount: order.amount,
+      expectedCurrency: order.currency,
     });
   } catch (err) {
     // The lookup failed — we could not check. That is NOT "they did not pay",
@@ -242,6 +248,23 @@ app.get("/success", async (req, res) => {
       .send("<h1>We could not confirm your payment just now</h1>" +
             "<p>No action needed — if you were charged, your order is safe. " +
             "Please refresh in a moment.</p>");
+    return;
+  }
+
+  // Not this order's payment: the return names another session (or none), or
+  // the session was for a different amount or currency. Checked before the
+  // status, so a paid session for another figure never reads as paid here.
+  if (
+    outcome.reason === "missing_session" ||
+    outcome.reason === "session_mismatch" ||
+    outcome.reason === "amount_mismatch"
+  ) {
+    if (outcome.reason === "amount_mismatch") {
+      console.error(
+        `Return for order ${order.orderId}: the session's amount does not match the order; not shown as paid.`,
+      );
+    }
+    res.status(400).send(NOT_MATCHED_PAGE);
     return;
   }
 
@@ -265,25 +288,14 @@ app.get("/success", async (req, res) => {
     return;
   }
 
-  // The session was paid. Now check it paid for THIS order: the amount and
-  // currency the server charged must be the ones your order record holds.
-  if (
-    outcome.amount !== order.amount ||
-    (outcome.currency ?? "").toUpperCase() !== order.currency.toUpperCase()
-  ) {
-    console.error(
-      `Return for order ${order.orderId}: the paid amount does not match the order; not shown as paid.`,
-    );
-    res.status(400).send(NOT_MATCHED_PAGE);
-    return;
-  }
-
   // ⚠️ Render the SERVER's amount, never `amount` from the redirect query
   // string. The query string is buyer-controlled and unauthenticated: anyone
   // can complete a real 1-unit payment and then edit the URL to show a
   // confirmation for any figure they like. `outcome.amount` came back from the
-  // authenticated session read (and was just checked against your order).
-  const displayAmount = formatMinorAmount(outcome.amount, order.currency);
+  // authenticated session read, and `confirmReturn` already checked it equals
+  // your order's amount (`expectedAmount`). A paid outcome always carries it.
+  const displayAmount =
+    outcome.amount === undefined ? "N/A" : formatMinorAmount(outcome.amount, order.currency);
 
   // ⚠️ Displaying a confirmation is safe to repeat. FULFILLING is not — this
   // URL can be replayed, and the status keeps reading "succeeded" every time.
