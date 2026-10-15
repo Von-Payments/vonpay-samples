@@ -50,23 +50,69 @@ const vonpay = new VonPayCheckout({ apiKey, baseUrl });
 app.post("/webhooks", express.raw({ type: "application/json" }));
 app.use(express.json());
 
+// This app's own public address (set BASE_URL when deployed, e.g.
+// https://shop.example.com). The return URL and the cookie below are built
+// from it; on https the cookie is marked Secure.
+const appUrl = (process.env.BASE_URL ?? `http://localhost:${port}`).replace(/\/+$/, "");
+
+// ── Your order records ───────────────────────────────────────────────
+// The order each checkout session was created for, keyed by session id.
+// In memory for the sample; a real app keeps this in its database (and the
+// webhook handler marks the same row paid).
+interface OrderRecord {
+  orderId: string;
+  amount: number; // minor units, exactly as sent to sessions.create()
+  currency: string;
+}
+const ordersBySession = new Map<string, OrderRecord>();
+
+// The cookie that ties a return to the browser that started the checkout.
+const CHECKOUT_COOKIE = "vonpay_checkout_session";
+
+function readCookie(header: string | undefined, name: string): string | undefined {
+  for (const part of (header ?? "").split(";")) {
+    const eq = part.indexOf("=");
+    if (eq !== -1 && part.slice(0, eq).trim() === name) {
+      try {
+        return decodeURIComponent(part.slice(eq + 1).trim());
+      } catch {
+        return undefined;
+      }
+    }
+  }
+  return undefined;
+}
+
 // ── Create checkout session ──────────────────────────────────────────
 app.post("/checkout", async (_req, res) => {
   // Stand-in for YOUR order id — in a real app, create the order first and use its id.
   const orderId = `order_${Date.now().toString(36)}`;
+  const amount = 2500;
+  const currency = "USD";
   try {
     const session = await vonpay.sessions.create(
       {
-        amount: 2500,
-        currency: "USD",
-        successUrl: `http://localhost:${port}/success`,
-        cancelUrl: `http://localhost:${port}/`,
-        lineItems: [{ name: "Sample Item", quantity: 1, unitAmount: 2500 }],
+        amount,
+        currency,
+        successUrl: `${appUrl}/success`,
+        cancelUrl: `${appUrl}/`,
+        lineItems: [{ name: "Sample Item", quantity: 1, unitAmount: amount }],
         metadata: { order_id: orderId },
       },
       // Key on YOUR order id. Here orderId is made per request, so this only dedupes the SDK's own retry of this call; to dedupe a double-click or refresh, create the order first and reuse its id.
       { idempotencyKey: `session:${orderId}` },
     );
+    // Remember which order this session pays for, on YOUR server. The return
+    // page looks the order up from this record, never from the URL.
+    ordersBySession.set(session.id, { orderId, amount, currency });
+    // And tie the return to this browser. HttpOnly: page scripts cannot read
+    // it. SameSite=Lax: it still comes back on the redirect from checkout.
+    res.cookie(CHECKOUT_COOKIE, session.id, {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      secure: appUrl.startsWith("https://"),
+    });
     res.redirect(303, session.checkoutUrl);
   } catch (err) {
     console.error("Checkout error:", err);
@@ -130,8 +176,29 @@ app.post("/webhooks", (req, res) => {
 });
 
 // ── Success return page ──────────────────────────────────────────────
+// Shown when a return cannot be matched to an order this server created for
+// this browser. Neutral on purpose: it is NOT "payment failed" (the buyer may
+// well have paid; the webhook settles that) and it offers no "pay again".
+const NOT_MATCHED_PAGE =
+  "<h1>We couldn't match this payment to an order started in this browser</h1>" +
+  "<p>If you paid, your order is safe and you will get a confirmation. " +
+  "You do not need to pay again.</p>";
+
 app.get("/success", async (req, res) => {
   const params = req.query as Record<string, string>;
+
+  // ⚠️ Match the return to an order YOUR server created, before anything else.
+  // `confirmReturn` answers "did this session succeed?" for ANY session on
+  // your account. Without this check, a success URL copied from another paid
+  // order of your shop (a cheap one, say) would show "Payment successful" for
+  // this one. So the session must be the one this browser started (the cookie
+  // set at /checkout) and must have an order record on your server.
+  const sessionId = typeof params.session === "string" ? params.session : "";
+  const order = sessionId ? ordersBySession.get(sessionId) : undefined;
+  if (!sessionId || sessionId !== readCookie(req.headers.cookie, CHECKOUT_COOKIE) || !order) {
+    res.status(400).send(NOT_MATCHED_PAGE);
+    return;
+  }
 
   // `confirmReturn` verifies the signature AND confirms server-side that the
   // payment actually succeeded.
@@ -155,7 +222,7 @@ app.get("/success", async (req, res) => {
     // `signatureValid` is `null` here (not checked); the authenticated session
     // read is what answers "did this buyer pay".
     outcome = await vonpay.sessions.confirmReturn(params, undefined, {
-      expectedSuccessUrl: `http://localhost:${port}/success`,
+      expectedSuccessUrl: `${appUrl}/success`,
       expectedKeyMode: apiKey.includes("_test_") ? "test" : "live",
       maxAgeSeconds: 600,
     });
@@ -198,15 +265,25 @@ app.get("/success", async (req, res) => {
     return;
   }
 
+  // The session was paid. Now check it paid for THIS order: the amount and
+  // currency the server charged must be the ones your order record holds.
+  if (
+    outcome.amount !== order.amount ||
+    (outcome.currency ?? "").toUpperCase() !== order.currency.toUpperCase()
+  ) {
+    console.error(
+      `Return for order ${order.orderId}: the paid amount does not match the order; not shown as paid.`,
+    );
+    res.status(400).send(NOT_MATCHED_PAGE);
+    return;
+  }
+
   // ⚠️ Render the SERVER's amount, never `amount` from the redirect query
   // string. The query string is buyer-controlled and unauthenticated: anyone
   // can complete a real 1-unit payment and then edit the URL to show a
   // confirmation for any figure they like. `outcome.amount` came back from the
-  // authenticated session read.
-  const displayAmount =
-    typeof outcome.amount === "number" && typeof outcome.currency === "string"
-      ? formatMinorAmount(outcome.amount, outcome.currency)
-      : "—";
+  // authenticated session read (and was just checked against your order).
+  const displayAmount = formatMinorAmount(outcome.amount, order.currency);
 
   // ⚠️ Displaying a confirmation is safe to repeat. FULFILLING is not — this
   // URL can be replayed, and the status keeps reading "succeeded" every time.
@@ -214,7 +291,8 @@ app.get("/success", async (req, res) => {
   // and refuse to fulfil one twice. Fulfil from the webhook, not from here.
   res.send(`
     <h1>Payment successful</h1>
-    <p>Session: ${esc(params.session)}</p>
+    <p>Order: ${esc(order.orderId)}</p>
+    <p>Session: ${esc(sessionId)}</p>
     <p>Status: ${esc(outcome.status ?? "")}</p>
     <p>Amount: ${esc(displayAmount)}</p>
     <p>Transaction: ${esc(outcome.transactionId ?? "N/A")}</p>
@@ -242,5 +320,5 @@ app.get("/", (_req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
+  console.log(`Server running at http://localhost:${port} (public address ${appUrl})`);
 });

@@ -2,7 +2,7 @@
 
 End-to-end reference integration for the **cart → redirect** pattern (Shopify-style hosted checkout). A merchant server creates a session, redirects the buyer to `checkout.vonpay.com`, and confirms the outcome server-side on return and from an HMAC-signed webhook when the session resolves.
 
-- **Stack:** Next.js 15 App Router, React 19, TypeScript strict
+- **Stack:** Next.js 16 App Router, React 19, TypeScript strict (Node.js 20.9 or later)
 - **Von Payments SDK:** `@vonpay/checkout-node` 3.x - 3.7.0 or later (`^3.7.0`)
 - **What it demonstrates:** session creation with an idempotency key, server-side return confirmation, HMAC webhook verification, security headers (CSP / HSTS / X-Frame-Options)
 
@@ -49,12 +49,18 @@ Or use [webhook.site](https://webhook.site) to inspect deliveries without local 
 ```
 app/page.tsx                   - "Pay $25.00" button (client)
 app/api/checkout/route.ts      - POST → vonpay.sessions.create(), returns checkoutUrl
-app/confirm/page.tsx           - Server-side return confirmation (confirmReturn)
+app/confirm/page.tsx           - Server-side return confirmation (confirmReturn), matched to your order
+lib/orders.ts                  - in-memory order records keyed by session id (use your database)
 app/api/webhooks/route.ts      - HMAC-signed webhook verification
 next.config.ts                 - CSP / HSTS / X-Frame-Options / Referrer-Policy headers
 ```
 
 The `sessions.create()` call receives a fully-typed request plus an idempotency key derived from the order id (a retry that reuses the same order id returns the same session. This sample creates its order id per request, so in your code create the order first and reuse its id - otherwise a double-click or refresh still makes a second session), and returns an `{id, checkoutUrl, expiresAt}` response. The buyer is redirected to `checkoutUrl`; After payment, the buyer is redirected back to `successUrl` with a signed query string. ⚠️ This sample does **not** verify that signature, deliberately: returns are signed with a platform-wide secret no merchant holds, so a per-merchant `ss_*` can only ever fail the check. ``sessions.confirmReturn()`` instead re-reads the session from the API using your own secret key - an authenticated answer to “did this buyer pay”, which the signature never was.
+
+**Match the return to YOUR order before showing success.** `confirmReturn()` tells you whether *a* session of your account was paid - any session. On its own, a success link copied from another paid order of your shop (a cheap one, say) would show "Payment successful" for this one. So `/api/checkout` records which order each session is for, on the server (`lib/orders.ts`, in memory here; use your database), and sets an HttpOnly cookie naming the session. `/confirm` shows a payment only when the returned session is the one this browser started, has an order record, and was paid the order's amount and currency. Anything else gets a neutral "we couldn't match this payment" page - not "payment failed", and no "pay again". This follows the usual practice for hosted checkouts: look your order up by the returned session id in your own records, never trust the URL alone, and fulfil from the webhook.
+
+- **One checkout per browser at a time.** The cookie holds the latest session this browser started. If a buyer opens two checkouts in two tabs and pays the first, its return gets the "couldn't match" page: the payment is still safe and the webhook still fulfils it. A real shop ties the return to the buyer's account or cart, or keeps every open session for the browser.
+- **The SDK can do this check for you.** An upcoming release of the SDK adds `expectedSessionId` and `expectedAmount` + `expectedCurrency` to `confirmReturn()`; a mismatch then comes back as not paid. This sample will switch to them once that release is published.
 
 Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header - there is no separate timestamp header). `vonpay.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent` discriminated union. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) - not your API key.
 

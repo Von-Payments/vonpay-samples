@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { VonPayCheckout } from "@vonpay/checkout-node";
 import { getTenant, getTenantCredentials } from "@/lib/tenants";
+import { getOrderBySession } from "@/lib/orders";
 import { formatMinorAmount } from "@/lib/money";
 
 interface Props {
@@ -19,6 +20,18 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
   const params2: Record<string, string> = {};
   for (const [k, v] of Object.entries(sp)) {
     if (typeof v === "string") params2[k] = v;
+  }
+
+  // ⚠️ Match the return to an order YOUR platform created for THIS tenant,
+  // before anything else. `confirmReturn` answers "did this session succeed?"
+  // for ANY session on the tenant's account. Without this check, a success URL
+  // copied from another paid order of the same tenant (a cheap one, say)
+  // would show "Payment captured" for this one. So the session must have an
+  // order record on your server, and that record must belong to this tenant.
+  const returnedSession = params2.session ?? "";
+  const order = returnedSession ? getOrderBySession(returnedSession) : undefined;
+  if (!order || order.tenantId !== merchantId) {
+    return <NotMatched tenantId={merchantId} tenantName={tenant.name} />;
   }
 
   const baseUrl = process.env.BASE_URL ?? "http://localhost:3000";
@@ -98,6 +111,19 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
     );
   }
 
+  // A paid session must have paid for THIS order: the amount and currency the
+  // server charged must be the ones your order record holds.
+  if (
+    outcome.paid &&
+    (outcome.amount !== order.amount ||
+      (outcome.currency ?? "").toUpperCase() !== order.currency.toUpperCase())
+  ) {
+    console.error(
+      `Return for tenant ${merchantId}, order ${order.orderId}: the paid amount does not match the order; not shown as paid.`,
+    );
+    return <NotMatched tenantId={merchantId} tenantName={tenant.name} />;
+  }
+
   // `outcome.status` is the server's reading, not the query string's snapshot.
   const status = outcome.status ?? "unknown";
   const sessionId = outcome.sessionId ?? params2.session ?? "";
@@ -130,6 +156,7 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
         </p>
         <table style={{ width: "100%", marginTop: 16, borderCollapse: "collapse" }}>
           <tbody>
+            <Row label="Order" value={order.orderId} />
             <Row label="Session" value={sessionId} />
             <Row label="Transaction" value={txId || "—"} />
             <Row label="Amount" value={displayAmount} />
@@ -137,6 +164,25 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
         </table>
       </div>
     </>
+  );
+}
+
+// Shown when a return cannot be matched to an order your platform created for
+// this tenant. Neutral on purpose: it is NOT "payment failed" (the buyer may
+// well have paid; the webhook settles that) and it offers no "pay again".
+function NotMatched({ tenantId, tenantName }: { tenantId: string; tenantName: string }) {
+  return (
+    <div className="card">
+      <h1 style={{ marginTop: 0 }}>We couldn&apos;t match this payment to an order</h1>
+      <p className="muted">
+        This return does not belong to an order created for {tenantName}. If the
+        buyer paid, the payment is safe and the webhook will report it. They do
+        not need to pay again.
+      </p>
+      <Link href={`/tenants/${tenantId}`} className="btn">
+        ← Back to {tenantName}
+      </Link>
+    </div>
   );
 }
 

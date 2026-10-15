@@ -2,6 +2,7 @@
 
 import os
 import time
+from typing import Any, Dict
 
 from flask import Flask, redirect, request, jsonify
 from flask.typing import ResponseReturnValue
@@ -36,18 +37,47 @@ def index():
     """
 
 
+# The order each checkout session was created for, keyed by session id. In
+# memory for the sample; a real app keeps this in its database (and the webhook
+# handler marks the same row paid).
+ORDERS_BY_SESSION: Dict[str, Dict[str, Any]] = {}
+
+# The cookie that ties a return to the browser that started the checkout.
+CHECKOUT_COOKIE = "vonpay_checkout_session"
+
+
 @app.post("/checkout")
 def create_checkout():
     # Stand-in for YOUR order id — in a real app, create the order first and use its id.
     order_id = f"order_{int(time.time() * 1000):x}"
+    amount = 1499
+    currency = "USD"
     session = checkout.sessions.create(
-        amount=1499, currency="USD", country="US",
+        amount=amount, currency=currency, country="US",
         success_url=f"{BASE_URL}/success",
         metadata={"order_id": order_id},
         # Key on YOUR order id. Here orderId is made per request, so this only dedupes the SDK's own retry of this call; to dedupe a double-click or refresh, create the order first and reuse its id.
         idempotency_key=f"session:{order_id}",
     )
-    return redirect(session.checkout_url)
+    # Remember which order this session pays for, on YOUR server. The return
+    # page looks the order up from this record, never from the URL.
+    ORDERS_BY_SESSION[session.id] = {
+        "order_id": order_id,
+        "amount": amount,  # minor units, exactly as sent above
+        "currency": currency,
+    }
+    response = redirect(session.checkout_url)
+    # And tie the return to this browser. HttpOnly: page scripts cannot read
+    # it. SameSite=Lax: it still comes back on the redirect from checkout.
+    response.set_cookie(
+        CHECKOUT_COOKIE,
+        session.id,
+        httponly=True,
+        samesite="Lax",
+        path="/",
+        secure=BASE_URL.startswith("https://"),
+    )
+    return response
 
 
 @app.post("/webhooks")
@@ -96,10 +126,35 @@ def webhooks() -> ResponseReturnValue:
     return jsonify({"received": True})
 
 
+# Shown when a return cannot be matched to an order this server created for
+# this browser. Neutral on purpose: it is NOT "payment failed" (the buyer may
+# well have paid; the webhook settles that) and it offers no "pay again".
+NOT_MATCHED_PAGE = (
+    "<h1>We couldn't match this payment to an order started in this browser</h1>"
+    "<p>If you paid, your order is safe and you will get a confirmation. "
+    "You do not need to pay again.</p>"
+)
+
+
 @app.get("/success")
 def success():
     params = dict(request.args)
     expected_mode = "test" if "_test_" in API_KEY else "live"
+
+    # ⚠️ Match the return to an order YOUR server created, before anything
+    # else. `confirm_return` answers "did this session succeed?" for ANY
+    # session on your account. Without this check, a success URL copied from
+    # another paid order of your shop (a cheap one, say) would show a success
+    # page for this one. So the session must be the one this browser started
+    # (the cookie set at /checkout) and must have an order record here.
+    session_id = params.get("session", "")
+    order = ORDERS_BY_SESSION.get(session_id) if session_id else None
+    if (
+        not session_id
+        or session_id != request.cookies.get(CHECKOUT_COOKIE)
+        or order is None
+    ):
+        return NOT_MATCHED_PAGE, 400
 
     # `confirm_return` verifies the signature AND confirms server-side that the
     # payment actually succeeded.
@@ -159,13 +214,30 @@ def success():
         status = escape(outcome.status or "unknown")
         return f"<h1>Payment not completed</h1><p>Status: {status}</p>", 402
 
+    # The session was paid. Now check it paid for THIS order: the amount and
+    # currency the server charged must be the ones your order record holds.
+    if (
+        outcome.amount != order["amount"]
+        or (outcome.currency or "").upper() != order["currency"].upper()
+    ):
+        app.logger.error(
+            "Return for order %s: the paid amount does not match the order; "
+            "not shown as paid.",
+            order["order_id"],
+        )
+        return NOT_MATCHED_PAGE, 400
+
     # ⚠️ Displaying a confirmation is safe to repeat. FULFILLING is not — this
     # URL can be replayed, and the status keeps reading "succeeded" every time.
     # Before shipping goods, record which session IDs you have already fulfilled
     # and refuse to fulfil one twice. Fulfil from the webhook, not from here.
+    order_id = escape(order["order_id"])
     session = escape(outcome.session_id or "")
     status = escape(outcome.status or "")
-    return f"<h1>Payment {status}</h1><p>Session: {session}</p>"
+    return (
+        f"<h1>Payment {status}</h1>"
+        f"<p>Order: {order_id}</p><p>Session: {session}</p>"
+    )
 
 
 @app.get("/health")

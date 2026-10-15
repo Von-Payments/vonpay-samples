@@ -23,6 +23,10 @@ You do not need a session signing secret (`ss_...`) for this sample. The return 
 ```bash
 export VON_PAY_SECRET_KEY=vp_sk_test_...
 export VON_PAY_WEBHOOK_SECRET=whsec_...
+# Optional: this app's own public address (defaults to http://localhost:3000).
+# Set it when deployed, e.g. https://shop.example.com: the return URL is built
+# from it, and on https the checkout cookie is marked Secure.
+# export BASE_URL=https://shop.example.com
 
 npm install
 npm run dev
@@ -47,6 +51,11 @@ server.ts        - Express server: /, /checkout, /webhooks, /success, /health
 ```
 
 The `sessions.create()` call sends an idempotency key derived from the order id, so a retry that reuses the same order id returns the same session. This sample creates its order id per request, so in your code create the order first and reuse its id - otherwise a double-click or refresh still makes a second session; it returns `{ id, checkoutUrl, expiresAt }`. The server redirects the buyer to `checkoutUrl`. After payment, the buyer is redirected back to `/success` with a signed query string. ⚠️ This sample does **not** verify that signature, deliberately: returns are signed with a platform-wide secret no merchant holds, so a per-merchant `ss_*` can only ever fail the check. ``sessions.confirmReturn()`` instead re-reads the session from the API using your own secret key - an authenticated answer to “did this buyer pay”, which the signature never was.
+
+**Match the return to YOUR order before showing success.** `confirmReturn()` tells you whether *a* session of your account was paid - any session. On its own, a success link copied from another paid order of your shop (a cheap one, say) would show "Payment successful" for this one. So `/checkout` records which order each session is for, on the server (here an in-memory map; use your database), and sets an HttpOnly cookie naming the session. `/success` shows a payment only when the returned session is the one this browser started, has an order record, and was paid the order's amount and currency. Anything else gets a neutral "we couldn't match this payment" page (HTTP 400) - not "payment failed", and no "pay again". This follows the usual practice for hosted checkouts: look your order up by the returned session id in your own records, never trust the URL alone, and fulfil from the webhook.
+
+- **One checkout per browser at a time.** The cookie holds the latest session this browser started. If a buyer opens two checkouts in two tabs and pays the first, its return gets the "couldn't match" page: the payment is still safe and the webhook still fulfils it. A real shop ties the return to the buyer's account or cart, or keeps every open session for the browser.
+- **The SDK can do this check for you.** An upcoming release of the SDK adds `expectedSessionId` and `expectedAmount` + `expectedCurrency` to `confirmReturn()`; a mismatch then comes back as not paid. This sample will switch to them once that release is published.
 
 Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header - there is no separate timestamp header). `vonpay.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent` discriminated union. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) - not your API key.
 

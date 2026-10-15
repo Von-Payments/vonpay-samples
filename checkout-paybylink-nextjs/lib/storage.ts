@@ -15,7 +15,12 @@ export interface PayLink {
 
 // Dev-only in-memory store. In production, swap for Postgres / SQLite / Redis
 // and make sure link rows are scoped to the authenticated merchant operator.
-const store = new Map<string, PayLink>();
+// Held on `globalThis` so the API routes and the pages (which Next.js may load
+// as separate modules) all see the same links; the confirm page depends on it.
+const holder = globalThis as typeof globalThis & {
+  __vonpaySamplePayLinks?: Map<string, PayLink>;
+};
+const store = (holder.__vonpaySamplePayLinks ??= new Map<string, PayLink>());
 
 export function saveLink(link: PayLink): void {
   store.set(link.id, link);
@@ -23,6 +28,14 @@ export function saveLink(link: PayLink): void {
 
 export function getLink(id: string): PayLink | undefined {
   return store.get(id);
+}
+
+/** The link a checkout session was created for, or undefined if it is not one of yours. */
+export function getLinkBySessionId(sessionId: string): PayLink | undefined {
+  for (const link of store.values()) {
+    if (link.sessionId === sessionId) return link;
+  }
+  return undefined;
 }
 
 export function listLinks(): PayLink[] {

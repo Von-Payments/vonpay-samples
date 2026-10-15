@@ -2,7 +2,7 @@
 
 Reference integration for the **pay-by-link** pattern: a merchant operator creates a hosted-checkout session from a dashboard form, shares the resulting `checkoutUrl` as a link or QR code, and watches the status update when the webhook arrives. Same `sessions.create()` surface as the cart → redirect flow, different UX: no cart, no per-buyer client code - the merchant is the one creating the session.
 
-- **Stack:** Next.js 15 App Router, React 19, TypeScript strict
+- **Stack:** Next.js 16 App Router, React 19, TypeScript strict (Node.js 20.9 or later)
 - **Von Payments SDK:** `@vonpay/checkout-node` 3.x - 3.7.0 or later (`^3.7.0`)
 - **What it demonstrates:** session creation for asynchronous payment, QR-code rendering, webhook-driven status updates, client-side polling of link status, server-side return confirmation, security headers (CSP / HSTS / X-Frame-Options)
 
@@ -57,6 +57,10 @@ next.config.ts                     - CSP / HSTS / X-Frame-Options / Referrer-Pol
 ```
 
 The `sessions.create()` call is the same one the cart → redirect sample makes - the difference is that here the merchant operator creates the session ahead of time (no buyer cart) and surfaces the URL out-of-band (email, SMS, QR). The create call sends an idempotency key derived from the link's own id, so a retry for the same link returns the same session instead of creating a second one. `cancelUrl` points back at the link detail page so a buyer who bails can resume from the same link.
+
+**The return page matches the payment to YOUR link before showing success.** `confirmReturn()` tells you whether *a* session of your account was paid - any session. On its own, a success link copied from another paid link (a cheap one, say) would show "Payment successful" here. A pay link is opened from an email or a QR code, so there is no browser cookie to check; instead `/confirm` looks the session up in your own link records (`lib/storage.ts`) and shows a payment only when the link exists and was paid its amount and currency. Anything else gets a neutral "we couldn't match this payment" page - not "payment failed", and no "pay again".
+
+- **The SDK can do this check for you.** An upcoming release of the SDK adds `expectedAmount` + `expectedCurrency` to `confirmReturn()`; a mismatch then comes back as not paid. This sample will switch to them once that release is published.
 
 Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header - there is no separate timestamp header). `vonpay.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent` discriminated union. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) - not your API key. **Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^3.7.0` covers it). This sample listens for `charge.succeeded` and `charge.failed` to update the link's status. ⚠️ **Not `session.succeeded`** - the server emits `session.*` internally, but those keys are absent from the merchant subscription catalog, which accepts an unknown event key, stores nothing and returns success. An endpoint subscribed to one receives nothing, forever, and every paid link would sit at `pending`.
 

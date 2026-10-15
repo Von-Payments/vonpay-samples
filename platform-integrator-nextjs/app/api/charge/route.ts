@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { VonPayCheckout } from "@vonpay/checkout-node";
 import { getTenant, getTenantCredentials } from "@/lib/tenants";
 import { getCustomer } from "@/lib/customers";
+import { saveOrder } from "@/lib/orders";
 
 // The shape the tenant page mints: `ord_` + a random (v4) UUID. Anything else
 // is refused rather than used as a key, so a missing or free-form value can
@@ -106,6 +107,16 @@ export async function POST(req: NextRequest) {
         idempotencyKey,
       },
     );
+
+    // Remember which tenant and order this session pays for, on YOUR server.
+    // The confirm page looks the order up from this record, never from the URL.
+    saveOrder(session.id, {
+      tenantId,
+      orderId,
+      customerId: customer.id,
+      amount: customer.chargeAmount,
+      currency: customer.currency,
+    });
 
     // 303 See Other ensures the browser GETs the checkoutUrl after a POST.
     return NextResponse.redirect(session.checkoutUrl, 303);
