@@ -10,7 +10,7 @@ A standalone reference integration showing how to **receive, verify, and process
 
 | Route | Header | Secret | Events |
 |---|---|---|---|
-| `POST /webhooks/vonpay` | `x-vonpay-signature: t=<unix>,v1=<hex>` | Per-endpoint `whsec_*` | `charge.succeeded`, `charge.failed`, `charge.refunded`, `refund.failed` |
+| `POST /webhooks/vonpay` | `x-vonpay-signature: t=<unix>,v1=<hex>` | Per-endpoint `whsec_*` | `charge.succeeded`, `charge.failed`, `charge.refunded`, `refund.failed`, and the five `subscription.*` events |
 
 The handler shows:
 
@@ -122,6 +122,26 @@ app.use(express.json()); // anything else gets parsed JSON
 
 If `express.json()` runs first, the original bytes are gone and the HMAC will not match. This is the most common webhook bug we see in the wild.
 
+## Subscriptions
+
+If you sell memberships, select the five subscription events **by name** on your endpoint: `subscription.created`, `subscription.renewed`, `subscription.payment_failed`, `subscription.cancelled`, `subscription.updated`. An endpoint subscribed to `"*"` does not receive them. All five carry the same `data` with the subscription's current state (`status`, `renewal_amount`, `next_bill_at`, `metadata` — your sign-up metadata, as sent — and more), so each handler can simply apply it.
+
+`handleSubscriptionEvent` in `server.ts` shows one handler per event:
+
+| Event | What the sample does | What your system does |
+|---|---|---|
+| `subscription.created` | Stores the membership | Link `subscription_id` to your record, by `payment_intent_id` or by your ids in `metadata` |
+| `subscription.renewed` | Creates ONE renewal order per subscription and `billing_cycle` | Build the renewal order here: same item, amount `amount`, payment `payment_intent_id` |
+| `subscription.payment_failed` | Marks past due, keeps `decline_code`; `status: "failed"` = ended | On `failed`, end the membership: no `subscription.cancelled` follows |
+| `subscription.cancelled` | Marks cancelled with `cancel_reason` | Any cancel (your API, staff, the customer, a chargeback). No refund is implied |
+| `subscription.updated` | Applies the new state; logs `changed_fields` and `actor` | Show who changed what in your support view |
+| `charge.*` / `payment_intent.*` with a `subscription_id` (not `charge.refunded`) | Logs it as a renewal payment | Never fulfil it, or fail an order, as a new purchase: the order comes from `subscription.renewed`, a failed renewal from `subscription.payment_failed`. A refund of a renewal charge is still a refund |
+| Any event type it does not know, `subscription.*` included | Logs it and acknowledges with `200` | Never fail a delivery you do not recognise |
+
+Two guards make a repeat harmless: the event-id guard on the route, and the `subscription_id` + `billing_cycle` key on renewal orders (two different events for the same cycle still create one order).
+
+Events arrive in **no guaranteed order**, `charge.*` and `subscription.*` included. The sample applies a subscription's state only from an event at least as new (the envelope `created`) as the newest one it applied, so a late, older event cannot bring an ended membership back; a late `subscription.renewed` still creates its order. Where order matters to you, re-read the subscription with `subscriptions.retrieve(id)`.
+
 ## Going to production
 
 Before flipping this code at `vp_sk_live_*`:
@@ -150,4 +170,4 @@ There is no `session.expired` / "buyer abandoned the checkout" event today. The 
 
 ## Tested against
 
-`@vonpay/checkout-node` 4.x · Node 20+ · Express 5
+`@vonpay/checkout-node` 4.4+ · Node 20+ · Express 5

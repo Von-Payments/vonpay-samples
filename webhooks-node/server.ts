@@ -1,5 +1,5 @@
 import express, { type Request, type Response } from "express";
-import { VonPayCheckout, type WebhookEvent } from "@vonpay/checkout-node";
+import { VonPayCheckout, type SubscriptionEventData, type WebhookEvent } from "@vonpay/checkout-node";
 
 // ─── Config ─────────────────────────────────────────────────────────────
 const port = parseInt(process.env.PORT ?? "3000", 10);
@@ -78,6 +78,139 @@ function markCompleted(key: string): void {
   handledKeys.add(key);
 }
 
+// ─── Subscriptions: what your system keeps ──────────────────────────────
+// A stand-in for your own database (orders, memberships). Replace both maps
+// with real tables; the handlers below show WHAT to store and WHEN.
+//
+// Subscription events are opt-in: an endpoint receives them only when it lists
+// each one by name (`"*"` does not include them). Select all five:
+// subscription.created, .renewed, .payment_failed, .cancelled, .updated.
+interface Membership {
+  subscriptionId: string; // vsub_live_… / vsub_test_…
+  status: string; // an open list: store unknown values as sent
+  renewalAmount: number | null; // minor units
+  currency: string | null;
+  nextBillAt: number | null; // Unix seconds; null while paused, held or ended
+  cancelReason: string | null;
+  lastDeclineCode: string | null;
+  metadata: Record<string, unknown>; // your sign-up metadata, as you sent it
+  lastEventAt: number; // the envelope `created` of the newest event applied
+}
+const memberships = new Map<string, Membership>(); // key: subscription_id
+// One renewal order per subscription and cycle. Keyed by the BUSINESS pair,
+// not only the event id: it is the line that must never be crossed twice.
+const renewalOrders = new Map<string, { paymentIntentId: string | null; amount: number | null }>();
+
+/**
+ * Apply the state an event carries. Every subscription event carries the whole
+ * current state, so applying the newest one is enough.
+ *
+ * ⚠️ Events arrive in NO guaranteed order. An older event that arrives late (a
+ * redelivered `renewed` after the `cancelled`) must not bring an ended
+ * membership back, so state from an event older than the newest one applied is
+ * skipped. Same-second events still apply. Where order matters to you, re-read
+ * the subscription with `subscriptions.retrieve(id)` instead.
+ */
+function applyState(data: SubscriptionEventData, created: number): Membership {
+  const m: Membership = memberships.get(data.subscription_id) ?? {
+    subscriptionId: data.subscription_id,
+    status: data.status,
+    renewalAmount: null,
+    currency: null,
+    nextBillAt: null,
+    cancelReason: null,
+    lastDeclineCode: null,
+    metadata: {},
+    lastEventAt: 0,
+  };
+  if (created >= m.lastEventAt) {
+    m.status = data.status;
+    m.renewalAmount = data.renewal_amount;
+    m.currency = data.currency;
+    m.nextBillAt = data.next_bill_at;
+    m.cancelReason = data.cancel_reason; // null unless the membership has ended
+    // `{}` when you sent none (or more than about 7 KB): applied as sent.
+    m.metadata = data.metadata ?? m.metadata;
+    m.lastEventAt = created;
+  } else {
+    console.log({ level: "info", route: "/webhooks/vonpay", msg: "older_event_state_skipped", subscriptionId: m.subscriptionId });
+  }
+  memberships.set(m.subscriptionId, m);
+  return m;
+}
+
+/**
+ * One handler per subscription event. Each one is safe to run twice: the event
+ * id guard in the route stops a redelivery, and each write below is keyed so a
+ * repeat changes nothing (for example a second `subscription.renewed` for the
+ * same cycle creates no second order).
+ */
+function handleSubscriptionEvent(type: string, d: SubscriptionEventData, created: number): void {
+  switch (type) {
+    case "subscription.created":
+      // Link the Von Payments subscription to YOUR record: by the sign-up
+      // payment (`payment_intent_id`) or by the ids you put in `metadata`.
+      // The sign-up's 201 answer may already have given you `subscription.id`;
+      // if it was null there, this event is where you learn it.
+      applyState(d, created);
+      break;
+    case "subscription.renewed": {
+      // A renewal charge succeeded: build the renewal order HERE (not from
+      // charge.succeeded). Same item, cycle `billing_cycle`, amount `amount`,
+      // payment `payment_intent_id`. The order is created even when the event
+      // arrives late: it is keyed by the cycle, not by arrival order.
+      if (d.billing_cycle === null) {
+        // Never expected on a renewal. Throwing leaves the event unrecorded, so
+        // a resend can retry it, instead of filing every such renewal under one key.
+        throw new Error("subscription.renewed without billing_cycle");
+      }
+      const m = applyState(d, created);
+      if (m.lastEventAt === created) m.lastDeclineCode = null; // the renewal paid
+      const orderKey = `${d.subscription_id}:${d.billing_cycle}`;
+      if (renewalOrders.has(orderKey)) {
+        console.log({ level: "info", route: "/webhooks/vonpay", msg: "renewal_order_exists", orderKey });
+      } else {
+        renewalOrders.set(orderKey, { paymentIntentId: d.payment_intent_id, amount: d.amount });
+        console.log({ level: "info", route: "/webhooks/vonpay", msg: "renewal_order_created", orderKey, amount: d.amount });
+      }
+      break;
+    }
+    case "subscription.payment_failed": {
+      // One event per declined attempt; the membership is past due and retries
+      // follow. `status: "failed"` means it was the final try and the
+      // membership has ended: no subscription.cancelled follows, so this is
+      // where you end it (`cancel_reason` says why).
+      const m = applyState(d, created);
+      if (m.lastEventAt === created) m.lastDeclineCode = d.decline_code;
+      break;
+    }
+    case "subscription.cancelled":
+      // Any cancel: your API call, your staff, the customer, a chargeback, or a
+      // revoked card permission. No refund is implied.
+      applyState(d, created);
+      break;
+    case "subscription.updated":
+      // Paused, resumed, held, released, price / discount / date / interval
+      // changed, card updated, a cancel scheduled or withdrawn, or restarted (a
+      // restart is an update, never a second `created`). The event carries the
+      // new state, so applying it is enough; `changed_fields` says what moved
+      // and `actor` says who moved it (show it in your support view).
+      applyState(d, created);
+      console.log({
+        level: "info",
+        route: "/webhooks/vonpay",
+        event: type,
+        changedFields: d.changed_fields,
+        actor: d.actor?.type ?? null,
+      });
+      break;
+  }
+}
+
+/** `subscription_id` on a payment event: set when Von Payments charged it for a subscription. */
+const subscriptionIdOf = (data: object): string | null =>
+  (data as { subscription_id?: string | null }).subscription_id ?? null;
+
 // ─── Express app ────────────────────────────────────────────────────────
 const app = express();
 
@@ -97,7 +230,9 @@ app.use(express.json());
 //          INSIDE the header (the `t=` part); there is no separate timestamp
 //          header.
 // Secret:  the per-endpoint `whsec_*` signing secret (NOT your API key).
-// Events:  charge.succeeded, charge.failed, charge.refunded, refund.failed.
+// Events:  charge.succeeded, charge.failed, charge.refunded, refund.failed, and
+//          (opt-in, select each by name) subscription.created, .renewed,
+//          .payment_failed, .cancelled and .updated.
 //          ⚠️ NOT session.succeeded — the server emits `session.*` internally,
 //          but those keys are absent from the merchant subscription catalog,
 //          which accepts an unknown key, stores nothing and returns success.
@@ -190,85 +325,105 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
   }
 
   try {
-    switch (event.type) {
-      case "charge.succeeded":
-        // → fulfill the order, send the receipt, mark the order paid in your DB.
-        // This is the fulfilment event. Session and transaction IDs are
-        // sensitive deep-link tokens — pass them to your fulfillment system but
-        // avoid logging them verbatim.
-        console.log({
-          level: "info",
-          route: "/webhooks/vonpay",
-          event: event.type,
-          merchantId: event.merchant_id,
-          amount: event.data.amount,
-          currency: event.data.currency,
-        });
-        break;
-      case "charge.failed":
-        // → mark the order failed; surface the failure reason in the buyer UI.
-        // Do NOT fulfill on a failed charge.
-        console.log({
-          level: "info",
-          route: "/webhooks/vonpay",
-          event: event.type,
-          merchantId: event.merchant_id,
-          error: event.data.failure_reason,
-          failureCode: event.data.failure_code,
-        });
-        break;
-      case "charge.refunded":
-        // → reverse fulfillment, post a credit memo, notify the buyer.
-        //
-        // ⚠️ Read `refund_amount` (what THIS event moved) and
-        // `amount_refunded_total` (running total against the charge), NOT
-        // `amount` or `is_partial`. Those two are ambiguous across payment
-        // connectors on a SECOND partial refund — some report this refund's
-        // delta and some the cumulative total, and nothing on the wire tells
-        // you which. Decide "is this charge now fully refunded?" by comparing
-        // `amount_refunded_total` against `original_charge_amount`.
-        console.log({
-          level: "info",
-          route: "/webhooks/vonpay",
-          event: event.type,
-          merchantId: event.merchant_id,
-          refundId: event.data.refund_id,
-          refundAmount: event.data.refund_amount,
-          refundedTotal: event.data.amount_refunded_total,
-          originalChargeAmount: event.data.original_charge_amount,
-          currency: event.data.currency,
-        });
-        break;
-      case "refund.failed":
-        // → a refund could NOT be completed. No money moved on this event:
-        // `refund_amount` is the reversal that failed to go through. Put the
-        // order back in a "refund owed" state and alert someone — nothing
-        // retries this for you. `reason_code` is a locked two-value set:
-        // `refund_declined` (terminal decline) or `refund_unresolved` (no
-        // provider response — the true state is unknown, so do NOT assume the
-        // buyer was not paid). `retry_available` says whether a retry is
-        // permitted at all.
-        console.log({
-          level: "warn",
-          route: "/webhooks/vonpay",
-          event: event.type,
-          merchantId: event.merchant_id,
-          refundId: event.data.refund_id,
-          refundAmount: event.data.refund_amount,
-          reasonCode: event.data.reason_code,
-          retryAvailable: event.data.retry_available,
-        });
-        break;
-      default:
-        // Forward-compatible — unknown events are a no-op. The 200 below acks
-        // the delivery; new event types may ship without an SDK bump, so never
-        // 5xx an event you don't recognize (that just triggers redelivery).
-        console.log({
-          level: "info",
-          route: "/webhooks/vonpay",
-          msg: "unknown_event_ignored",
-          event: event.type,
-        });
+    // A payment Von Payments made for a subscription (a renewal, a "bill now",
+    // or the overdue charge on a card update) carries `subscription_id` and
+    // `billing_cycle` on charge.* and payment_intent.*; a sign-up and every
+    // other payment carry null. Do NOT fulfil it, or fail an order, as a new
+    // purchase: the order comes from subscription.renewed and a failed renewal
+    // from subscription.payment_failed. A REFUND of a renewal charge is still a
+    // refund: charge.refunded is not skipped.
+    const isPaymentEvent = event.type.startsWith("charge.") || event.type.startsWith("payment_intent.");
+    const subscriptionId = isPaymentEvent && event.type !== "charge.refunded" ? subscriptionIdOf(event.data) : null;
+    if (subscriptionId !== null) {
+      console.log({ level: "info", route: "/webhooks/vonpay", event: event.type, msg: "renewal_payment", subscriptionId });
+    } else {
+      switch (event.type) {
+        case "subscription.created":
+        case "subscription.renewed":
+        case "subscription.payment_failed":
+        case "subscription.cancelled":
+        case "subscription.updated":
+          handleSubscriptionEvent(event.type, event.data, event.created);
+          break;
+        case "charge.succeeded":
+          // → fulfill the order, send the receipt, mark the order paid in your DB.
+          // This is the fulfilment event. Session and transaction IDs are
+          // sensitive deep-link tokens — pass them to your fulfillment system but
+          // avoid logging them verbatim.
+          console.log({
+            level: "info",
+            route: "/webhooks/vonpay",
+            event: event.type,
+            merchantId: event.merchant_id,
+            amount: event.data.amount,
+            currency: event.data.currency,
+          });
+          break;
+        case "charge.failed":
+          // → mark the order failed; surface the failure reason in the buyer UI.
+          // Do NOT fulfill on a failed charge.
+          console.log({
+            level: "info",
+            route: "/webhooks/vonpay",
+            event: event.type,
+            merchantId: event.merchant_id,
+            error: event.data.failure_reason,
+            failureCode: event.data.failure_code,
+          });
+          break;
+        case "charge.refunded":
+          // → reverse fulfillment, post a credit memo, notify the buyer.
+          //
+          // ⚠️ Read `refund_amount` (what THIS event moved) and
+          // `amount_refunded_total` (running total against the charge), NOT
+          // `amount` or `is_partial`. Those two are ambiguous across payment
+          // connectors on a SECOND partial refund — some report this refund's
+          // delta and some the cumulative total, and nothing on the wire tells
+          // you which. Decide "is this charge now fully refunded?" by comparing
+          // `amount_refunded_total` against `original_charge_amount`.
+          console.log({
+            level: "info",
+            route: "/webhooks/vonpay",
+            event: event.type,
+            merchantId: event.merchant_id,
+            refundId: event.data.refund_id,
+            refundAmount: event.data.refund_amount,
+            refundedTotal: event.data.amount_refunded_total,
+            originalChargeAmount: event.data.original_charge_amount,
+            currency: event.data.currency,
+          });
+          break;
+        case "refund.failed":
+          // → a refund could NOT be completed. No money moved on this event:
+          // `refund_amount` is the reversal that failed to go through. Put the
+          // order back in a "refund owed" state and alert someone — nothing
+          // retries this for you. `reason_code` is a locked two-value set:
+          // `refund_declined` (terminal decline) or `refund_unresolved` (no
+          // provider response — the true state is unknown, so do NOT assume the
+          // buyer was not paid). `retry_available` says whether a retry is
+          // permitted at all.
+          console.log({
+            level: "warn",
+            route: "/webhooks/vonpay",
+            event: event.type,
+            merchantId: event.merchant_id,
+            refundId: event.data.refund_id,
+            refundAmount: event.data.refund_amount,
+            reasonCode: event.data.reason_code,
+            retryAvailable: event.data.retry_available,
+          });
+          break;
+        default:
+          // Forward-compatible — unknown events are a no-op. The 200 below acks
+          // the delivery; new event types may ship without an SDK bump, so never
+          // 5xx an event you don't recognize (that just triggers redelivery).
+          console.log({
+            level: "info",
+            route: "/webhooks/vonpay",
+            msg: "unknown_event_ignored",
+            event: event.type,
+          });
+      }
     }
 
     // ⛔ COMPLETION IS RECORDED HERE — the last statement of the try, reached
