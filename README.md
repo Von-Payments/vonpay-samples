@@ -87,8 +87,8 @@ The samples themselves are written to be agent-paste-friendly: short files, expl
 
 | SDK | Package | Samples pin | Current release (checked 2026-11-03) | Used in |
 |---|---|---|---|---|
-| Node.js | [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) | `^4.0.0`; webhooks-node `^4.4.0` (lockfiles `4.4.0`) | `4.5.0` | nextjs, express, paybylink-nextjs, platform-integrator-nextjs, payment-intents-node, payment-intents-3ds, saved-cards-mit, checkout-embedded, webhooks-node |
-| Python | [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) | `>=4.0,<5` | `4.5.0` | flask, payment-intents-python |
+| Node.js | [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) | `^4.5.0` (lockfiles `4.5.0`) | `4.5.0` | nextjs, express, paybylink-nextjs, platform-integrator-nextjs, payment-intents-node, payment-intents-3ds, saved-cards-mit, checkout-embedded, webhooks-node |
+| Python | [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) | `>=4.5,<5` | `4.5.0` | flask, payment-intents-python |
 | CLI | [`@vonpay/checkout-cli`](https://www.npmjs.com/package/@vonpay/checkout-cli) | not pinned | `0.18.0` | install separately for ad-hoc testing or agent-tool use |
 | MCP | [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp) | `^6.4.2` (lockfile `6.4.2`) | `6.4.2` | agent-mcp; install in an MCP-aware runtime (Claude Desktop, Cursor, etc.) |
 | Test cards | [`@vonpay/test-cards`](https://www.npmjs.com/package/@vonpay/test-cards) | not pinned | `0.2.1` | the sandbox test cards as data, for your own tests or tooling |

@@ -6,8 +6,8 @@
 
 ## SDK release lines (checked 2026-11-03)
 
-- @vonpay/checkout-node - samples pin ^4.0.0, webhooks-node ^4.4.0 (lockfiles 4.4.0); current 4.5.0 (npm)  # Node / TypeScript server SDK
-- vonpay-checkout - samples pin >=4.0,<5; current 4.5.0 (PyPI)                      # Python server SDK
+- @vonpay/checkout-node - samples pin ^4.5.0 (lockfiles 4.5.0); current 4.5.0 (npm)  # Node / TypeScript server SDK
+- vonpay-checkout - samples pin >=4.5,<5; current 4.5.0 (PyPI)                      # Python server SDK
 - @vonpay/checkout-mcp - sample pins ^6.4.2 (lockfile 6.4.2); current 6.4.2 (npm)  # MCP server for AI-agent runtimes; 26 tools incl. payment reports + subscription changes; VONPAY_MCP_TOOLS=read for read-only; live-key money actions need a person's approval
 - @vonpay/checkout-cli - not pinned by any sample; current 0.18.0 (npm)            # CLI for ad-hoc testing / agent tool use
 - @vonpay/test-cards - not pinned by any sample; current 0.2.1 (npm)               # the sandbox test cards as data
@@ -75,7 +75,7 @@ assuming. "Current" above is a point-in-time reading.
    merchant dashboard lists it), payment_method.attached (not selectable yet),
    merchant.card_testing_suspected (live only; an alert, nothing was blocked;
    hold fulfilment of approved payments you do not recognise), and the five
-   subscription.* events (typed from SDK 4.4.0; webhooks-node pins ^4.4.0).
+   subscription.* events (typed from SDK 4.4.0; every Node sample pins ^4.5.0).
    webhooks-node handles charge.* + refund.failed (hosted checkout / refunds)
    and the five subscription.* events; payment-intents-3ds confirms the
    terminal state from payment_intent.succeeded / payment_intent.failed.
@@ -167,6 +167,13 @@ assuming. "Current" above is a point-in-time reading.
    exported since 3.0.0; minorUnitDigits returns undefined (never a guess) for
    a code the API does not know or whose decimals are still being confirmed,
    so show raw minor units rather than convert.
+
+7. Keep the staff sign-in (checkout-paybylink-nextjs, platform-integrator-nextjs).
+   proxy.ts puts every page and route behind HTTP Basic auth with ADMIN_TOKEN,
+   except the buyer's return page, /api/webhooks and Next.js static files. In production
+   (NODE_ENV=production) they answer 403 until ADMIN_TOKEN is set. New routes
+   are gated by default; open one only if buyers must reach it. Replace it with
+   your own sign-in before deploying.
 
 ## Type coverage on the 4.x SDK
 
