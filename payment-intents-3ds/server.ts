@@ -10,8 +10,9 @@
  * `payment_intent.failed` webhook — never by the buyer's browser.
  *
  * Flow demonstrated:
- *   POST /charge       Create a manual-capture intent against the saved card.
- *                      Branch on status:
+ *   POST /orders       Start an order (the page at / does this for you).
+ *   POST /charge       Create a manual-capture intent against the saved card,
+ *                      for that order. Branch on status:
  *                        requires_action → redirect the buyer to the 3DS URL
  *                        authorized      → no challenge; capture immediately
  *                        failed          → surface the decline
@@ -20,12 +21,13 @@
  *   POST /webhooks     Verify the signature, then act on payment_intent.* to
  *                      confirm the post-challenge terminal state.
  *
- * Written against @vonpay/checkout-node 2.x — 2.11.0 or later. 2.5.0 is the
+ * Written against @vonpay/checkout-node 4.x — 4.5.0 or later. 2.5.0 is the
  * first release that types `returnUrl` on `paymentIntents.create`, and 2.7.0
  * the first that types `test_event` on webhook events. Every field
  * this sample sends and reads is on the SDK's typed surface: no casts, no local
  * type bridges.
  */
+import { randomUUID } from "node:crypto";
 import express, { type Request, type Response } from "express";
 import {
   VonPayCheckout,
@@ -49,8 +51,10 @@ if (!apiKey) {
 // Per-endpoint webhook signing secret (whsec_…), shown ONCE when you create the
 // webhook endpoint in the dashboard. This is NOT your API key — verifying with
 // the API key will fail against real deliveries.
-const webhookSecret = process.env.VON_PAY_WEBHOOK_SECRET;
-if (!webhookSecret) {
+// Refused when missing or still the .env.example placeholder: verifying against
+// an empty or published value would accept a forged delivery.
+const webhookSecret = process.env.VON_PAY_WEBHOOK_SECRET?.trim();
+if (!webhookSecret || webhookSecret === "whsec_your_endpoint_signing_secret") {
   console.error(
     "VON_PAY_WEBHOOK_SECRET is required (whsec_…). Copy .env.example to .env and fill it in.",
   );
@@ -126,9 +130,39 @@ const app = express();
 // other route still gets parsed JSON.
 app.use("/webhooks", express.raw({ type: "application/json", limit: "1mb" }));
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+
+// ─── Orders ─────────────────────────────────────────────────────────────
+// Your order records, in memory for the sample (restarting forgets them, and
+// nothing evicts old ones). A real app creates the order row in its database
+// and uses that row's id.
+//
+// ⛔ The idempotency keys below are built from the STORED order's id, never
+// from an id made up inside /charge. A double click or a retried POST of the
+// same order then sends the SAME key, and the API returns the payment it
+// already made instead of charging the card a second time. An id minted per
+// request would give every retry a new key, which protects nothing.
+interface Order {
+  id: string;
+  amount: number;
+  currency: string;
+}
+const orders = new Map<string, Order>();
+
+function createOrder(): Order {
+  const order: Order = { id: `ord_${randomUUID()}`, amount: AMOUNT_MINOR, currency: CURRENCY };
+  orders.set(order.id, order);
+  return order;
+}
+
+// POST /orders — start an order. Returns its id; pass it to /charge.
+app.post("/orders", (_req: Request, res: Response): void => {
+  res.status(201).json({ orderId: createOrder().id });
+});
 
 // ─── Create + 3DS branch ─────────────────────────────────────────────────
-// POST /charge  (no body — the server decides what is charged, and to which card)
+// POST /charge  { orderId } — the server decides what is charged, and to which
+// card. The order id only says WHICH of your orders this is.
 //
 // ⛔ The card is NOT read from the request. This route used to accept
 // `{ paymentMethod: "vp_pmt_..." }` in the body, which let anyone who had seen
@@ -154,11 +188,21 @@ app.post("/charge", async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  const orderId = `ord_${Date.now().toString(36)}`;
+  // The order must be one THIS server created. Its stored amount and id are
+  // what get charged and keyed; nothing else in the request is read.
+  const requested: unknown = req.body?.orderId;
+  const order = typeof requested === "string" ? orders.get(requested) : undefined;
+  if (!order) {
+    res.status(400).json({
+      error: "Unknown order. Start one with POST /orders (or load the page at /), then pay it.",
+    });
+    return;
+  }
+  const orderId = order.id;
 
   const chargeParams: CreatePaymentIntentParams = {
-    amount: AMOUNT_MINOR,
-    currency: CURRENCY,
+    amount: order.amount,
+    currency: order.currency,
     captureMethod: "manual",
     paymentMethod: { id: paymentMethodId },
     // ⛔ Send the buyer the card was saved for on every saved-card charge. The
@@ -172,6 +216,9 @@ app.post("/charge", async (req: Request, res: Response): Promise<void> => {
 
   let intent: PaymentIntent;
   try {
+    // Same order → same key → the API answers a repeat with the payment it
+    // already made. ⚠ It replays a decline too: to let the buyer try again
+    // after a decline, start a new order (or add an attempt number to the key).
     intent = await vonpay.paymentIntents.create(chargeParams, {
       idempotencyKey: `${orderId}:authorize`,
     });
@@ -379,6 +426,9 @@ app.get("/health", async (_req, res) => {
 });
 
 app.get("/", (_req, res) => {
+  // One order per page view. Submitting this form twice sends the same order
+  // id, so it can only ever be charged once.
+  const order = createOrder();
   res.type("html").send(
     [
       "<h1>Von Payments — Payment Intents 3DS sample</h1>",
@@ -386,9 +436,11 @@ app.get("/", (_req, res) => {
       "VON_PAY_PAYMENT_METHOD. If the bank challenges, the server redirects",
       "you to the issuer challenge, then confirms the outcome from the webhook.</p>",
       '<form action="/charge" method="POST">',
+      `  <input type="hidden" name="orderId" value="${escapeHtml(order.id)}" />`,
       "  <button type=\"submit\">Pay $49.99 (3DS challenge)</button>",
       "</form>",
-      "<p>POST /charge — create intent, redirect to 3DS on requires_action</p>",
+      "<p>POST /orders — start an order</p>",
+      "<p>POST /charge — create intent for an order, redirect to 3DS on requires_action</p>",
       "<p>GET  /3ds/return — issuer challenge return (UX only)</p>",
       "<p>POST /webhooks — verifies x-vonpay-signature, confirms terminal state</p>",
     ].join("\n"),

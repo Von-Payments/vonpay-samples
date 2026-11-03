@@ -23,6 +23,7 @@
  * (2.x): `capabilities.get`, `tokens.create`, `paymentIntents.create`
  * (incl. the `mit` block). No raw fetch, no hand-rolled HMAC.
  */
+import { randomUUID } from "node:crypto";
 import {
   VonPayCheckout,
   VonPayError,
@@ -85,7 +86,7 @@ function logError(label: string, err: unknown): void {
 async function main(): Promise<void> {
   // A single run id keeps idempotency keys + metadata correlated across the
   // four steps. Re-running the script gives you a fresh run id (fresh chain).
-  const runId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const runId = randomUUID();
   const subscriptionId = `sub_${runId}`;
   // Declared ONCE and reused by the vault call and BOTH charges. It was
   // previously inlined at the vault call only, and the two charges omitted it

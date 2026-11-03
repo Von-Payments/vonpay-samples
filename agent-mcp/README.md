@@ -84,13 +84,13 @@ File-name conventions by client:
 
 ### 5. Restart the client. Confirm tools appear.
 
-In Claude Code: type `/mcp`. You should see `vonpay-checkout` with 12 tools. In Cursor: the Tools panel shows the same list. In Claude Desktop: the 🔌 icon appears in the input box.
+In Claude Code: type `/mcp`. You should see `vonpay-checkout` with 26 tools. In Cursor: the Tools panel shows the same list. In Claude Desktop: the 🔌 icon appears in the input box.
 
 If nothing shows up, check the MCP server logs - usually a missing or malformed `VON_PAY_SECRET_KEY`.
 
 ## What the agent can do
 
-12 tools across three surfaces.
+26 tools in five groups (checkout-mcp 6.4 or later). To give an agent only the tools that read - nothing that charges, refunds, saves a card, creates a session or changes a subscription - set `VONPAY_MCP_TOOLS=read` in the server's environment, and use a key that holds only read permissions.
 
 ### Hosted checkout
 
@@ -101,6 +101,13 @@ If nothing shows up, check the MCP server logs - usually a missing or malformed 
 | `vonpay_checkout_get_payment_intent` | Look up a payment intent's stored state (read-only; only `succeeded` means captured) |
 | `vonpay_checkout_simulate_payment` | Generate a synthetic `succeeded`/`failed`/`expired` payload (no real API call) |
 
+### Payment reporting (read-only)
+
+| Tool | What it does |
+|---|---|
+| `vonpay_checkout_list_payment_intents` | List payment intents, newest first, with filters (outcome, store, one metadata tag, card brand, a window of at most 31 days). Never shows buyer identity or your metadata |
+| `vonpay_checkout_summarize_approvals` | Approval and decline rates, counts and amounts, optionally grouped by time, store, tag and more. A rate with no traffic is null, never 0% |
+
 ### Discrete-lifecycle
 
 | Tool | What it does |
@@ -110,6 +117,18 @@ If nothing shows up, check the MCP server logs - usually a missing or malformed 
 | `vonpay_checkout_void_payment_intent` | Release an auth hold pre-capture |
 | `vonpay_checkout_create_refund` | Refund a captured payment intent (`paymentIntent`) or a settled transaction (`transaction`) - exactly one, full or partial. Neither id is permission to refund: both are visible to the shopper's browser, so only refund an id from your own order records. On a live key, a refund by `transaction` also needs the `sessionId` the payment belongs to, or it is refused before anyone is asked. |
 | `vonpay_checkout_create_token` | Vault a card. Pass `setupForFutureUse: "on_session"` for in-session reuse (upsells) or `"off_session"` for recurring / MIT; omit for single-use. Needs whatever your payment provider needs, such as a `providerReference` from your card form - on a test key too; no card is made up for you. |
+
+### Subscriptions
+
+| Tool | What it does |
+|---|---|
+| `vonpay_checkout_list_subscriptions` / `vonpay_checkout_get_subscription` | List subscriptions or read one (status, price, interval, next bill date, discount, pause, scheduled cancel). Read-only |
+| `vonpay_checkout_cancel_subscription` / `vonpay_checkout_unschedule_subscription_cancel` | Cancel now or at the end of the paid period (a cancel never refunds); withdraw a scheduled cancel |
+| `vonpay_checkout_pause_subscription` / `vonpay_checkout_resume_subscription` / `vonpay_checkout_skip_subscription_renewal` | Pause renewals, resume them, or skip the next one |
+| `vonpay_checkout_set_subscription_next_bill_date` / `vonpay_checkout_set_subscription_interval` / `vonpay_checkout_set_subscription_price` | Move the next bill date, change how often it renews, or set the renewal price |
+| `vonpay_checkout_set_subscription_discount` / `vonpay_checkout_remove_subscription_discount` | Set a percent or amount off future renewals, or remove it |
+
+Every subscription change needs an `idempotencyKey`, on sandbox keys too, unless it is a `dryRun: true` preview (which changes nothing).
 
 ### Diagnostics
 
@@ -196,9 +215,11 @@ This sample uses a sandbox key (`vp_sk_test_*`). Sandbox keys are never gated - 
 
 With a live key (`vp_sk_live_*`), five tools move real money: `create_payment_intent`, `capture_payment_intent`, `void_payment_intent`, `create_refund`, and `create_token` when it saves a reusable card (`setupForFutureUse` set). For each of those calls, the MCP server asks **the person** - not the agent - to approve that specific action, amount and id through your MCP client's own confirmation prompt. The call goes to Von Payments only if they accept. If they decline, dismiss it, or do not answer within 5 minutes, nothing is sent. Approval never carries over to the next call.
 
+The same prompt also asks the person before each checkout session (`create_session`) and each subscription change on a live key.
+
 On a live key, `create_payment_intent`, `capture_payment_intent`, `void_payment_intent` and `create_refund` also need an `idempotencyKey`; without one the call is refused before the person is asked, and nothing is sent. A refund by `transaction` also needs the `sessionId` the payment belongs to, and the prompt then shows the payment's details looked up from Von Payments; without it the call is refused.
 
-**Your MCP client must support user confirmation prompts** (the MCP "elicitation" feature). If it does not, those five tools are refused on a live key - use a client that does, or stay on a sandbox key. The call must also pass `confirmLive: true`, but that flag is set by the AI model, so on its own it proves nothing and is not the safeguard.
+**Your MCP client must support user confirmation prompts** (the MCP "elicitation" feature). If it does not, those tools are refused on a live key - use a client that does, or stay on a sandbox key. The call must also pass `confirmLive: true`, but that flag is set by the AI model, so on its own it proves nothing and is not the safeguard.
 
 ⚠️ Know what this check is and is not. It runs in the MCP server process on your machine, not at Von Payments, and the prompt is drawn by your MCP client, so it is only as trustworthy as that client. Do not use a client or setting that approves prompts automatically. Read each prompt before accepting it, especially if the agent has been reading untrusted content (customer messages, web pages, documents), which can try to steer it.
 

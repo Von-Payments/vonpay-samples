@@ -15,7 +15,7 @@ const vonpay = new VonPayCheckout({
 
 export async function POST() {
   // Stand-in for YOUR order id — in a real app, create the order first and use its id.
-  const orderId = `order_${Date.now().toString(36)}`;
+  const orderId = `order_${crypto.randomUUID()}`;
   const amount = 2500;
   const currency = "USD";
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";

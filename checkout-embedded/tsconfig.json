@@ -10,5 +10,5 @@
     "types": ["node"],
     "outDir": "dist"
   },
-  "include": ["server.ts"]
+  "include": ["server.ts", "app.ts"]
 }

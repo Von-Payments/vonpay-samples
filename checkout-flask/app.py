@@ -1,7 +1,7 @@
 """Von Payments Checkout — Flask sample app."""
 
 import os
-import time
+import uuid
 from typing import Any, Dict
 
 from flask import Flask, redirect, request, jsonify
@@ -14,7 +14,15 @@ app = Flask(__name__)
 API_KEY = os.environ["VON_PAY_SECRET_KEY"]
 # Per-endpoint webhook signing secret (whsec_…), shown once when you create the
 # webhook endpoint. This is NOT your API key.
-WEBHOOK_SECRET = os.environ["VON_PAY_WEBHOOK_SECRET"]
+#
+# Refuse to start when it is missing or still the .env.example placeholder:
+# verifying against an empty or published value would accept a forged delivery.
+WEBHOOK_SECRET = os.environ.get("VON_PAY_WEBHOOK_SECRET", "").strip()
+if not WEBHOOK_SECRET or WEBHOOK_SECRET == "whsec_your_endpoint_signing_secret":
+    raise SystemExit(
+        "VON_PAY_WEBHOOK_SECRET is required (whsec_...). Copy .env.example to .env "
+        "and set it to your endpoint's signing secret."
+    )
 BASE_URL = os.environ["BASE_URL"].rstrip("/")
 
 # The SDK targets production by default; a ``vp_sk_test_*`` key runs in sandbox
@@ -49,7 +57,7 @@ CHECKOUT_COOKIE = "vonpay_checkout_session"
 @app.post("/checkout")
 def create_checkout():
     # Stand-in for YOUR order id — in a real app, create the order first and use its id.
-    order_id = f"order_{int(time.time() * 1000):x}"
+    order_id = f"order_{uuid.uuid4()}"
     amount = 1499
     currency = "USD"
     session = checkout.sessions.create(

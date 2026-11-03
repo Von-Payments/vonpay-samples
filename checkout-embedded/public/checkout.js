@@ -150,15 +150,46 @@ async function main() {
         });
         const body = await res.json();
         if (!res.ok) {
+          if (body.outcome_unknown === true) {
+            // The server cannot say whether money moved (or this checkout
+            // already has a payment). Do NOT offer Pay again: a second
+            // attempt could charge the buyer twice.
+            showUnknownOutcome();
+            return;
+          }
           throw new Error(body.error ?? `charge returned ${res.status}`);
         }
+        if (body.outcome === "failed") {
+          // Declined: nothing to fulfil, and the buyer may try another card.
+          showStatus("error", "The card was declined. Try another card.");
+          resetButton();
+          return;
+        }
+        if (body.outcome === "requires_action") {
+          // The bank wants a 3-D Secure check. This sample has no page for
+          // the bank to send the buyer back to, so it cannot finish one. Say
+          // so plainly, and do not offer Pay again: this checkout already has
+          // a payment waiting on that check. (A real integration sends a
+          // return URL with the charge and redirects the buyer to the bank:
+          // see the payment-intents-3ds sample.)
+          showStatus(
+            "error",
+            "Your bank wants to verify this payment (3-D Secure). This sample cannot complete a bank check, so the payment was not finished. Use a card that needs no check, or see the payment-intents-3ds sample.",
+          );
+          payButton.disabled = true;
+          payButton.textContent = "Bank check needed";
+          return;
+        }
         showStatus(
-          "success",
-          `Charged ${escapeHtml(brandLine(result))}. Payment intent <code>${escapeHtml(body.id)}</code> is <strong>${escapeHtml(body.status)}</strong>.<br />Confirm settlement via the webhook before fulfilling the order.`,
+          body.outcome === "paid" ? "success" : "pending",
+          `Payment on ${escapeHtml(brandLine(result))}: <strong>${escapeHtml(body.outcome)}</strong> (payment intent <code>${escapeHtml(body.intent_id)}</code>).<br />Confirm settlement via the webhook before fulfilling the order.`,
         );
+        payButton.textContent = "Submitted";
       } catch (err) {
-        showStatus("error", `Charge failed: ${escapeHtml(String(err))}`);
-        resetButton();
+        // The request or its answer was lost on the way. The server may have
+        // charged the card, so do not offer Pay again on this page.
+        console.error("charge request failed:", err);
+        showUnknownOutcome();
       }
       return;
     }
@@ -185,6 +216,15 @@ async function main() {
     payButton.disabled = false;
     payButton.textContent = `Pay ${formatAmount(config.amount, config.currency)}`;
   }
+}
+
+function showUnknownOutcome() {
+  showStatus(
+    "pending",
+    "We could not confirm whether this payment went through. Please do not pay again. The webhook (or your dashboard) has the result.",
+  );
+  payButton.disabled = true;
+  payButton.textContent = "Result pending";
 }
 
 function brandLine(result) {

@@ -4,6 +4,7 @@ import {
   findTenantByVonPayMerchantId,
   getTenantCredentials,
 } from "@/lib/tenants";
+import { getOrderBySession, type OrderRecord } from "@/lib/orders";
 
 /**
  * POST /api/webhooks — multi-tenant webhook receiver.
@@ -41,8 +42,8 @@ import {
 // equivalent in production — webhook deliveries can hit multiple
 // instances and you must dedupe across them.
 //
-// The dedup key is the event `id` (`vp_evt_*`), which is unique per
-// outbound event — see the handler below.
+// The dedup key is the TENANT plus the event `id` (`vp_evt_*`) — see the
+// handler below for why the tenant is part of it.
 const seenEventKeys = new Map<string, number>();
 const SEEN_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
@@ -80,6 +81,23 @@ function markCompleted(eventKey: string): void {
   seenEventKeys.set(eventKey, Date.now());
 }
 
+/**
+ * The order a payment event is about, ONLY if it belongs to `tenantId`.
+ *
+ * ⛔ A valid signature proves which TENANT sent the event, not which order it
+ * may touch. Each tenant registers its own endpoint and can read its own
+ * `whsec_*`, so a tenant (or anyone who obtains one tenant's secret) can sign
+ * an event that names ANOTHER tenant's session id. Session ids are not
+ * secret: they travel in checkout and return URLs. Without this check, that
+ * event would mark another tenant's order paid. The confirm page applies the
+ * same rule: it refuses an order whose `tenantId` is not this tenant's.
+ */
+function orderOfTenant(tenantId: string, sessionId: string | null | undefined): OrderRecord | undefined {
+  if (!sessionId) return undefined;
+  const order = getOrderBySession(sessionId);
+  return order && order.tenantId === tenantId ? order : undefined;
+}
+
 export async function POST(req: NextRequest) {
   // Read raw body — required for HMAC verification. Capture this BEFORE
   // JSON parsing; re-serialized JSON will not match the signature.
@@ -111,7 +129,20 @@ export async function POST(req: NextRequest) {
     console.warn(`Webhook for unknown merchant '${safeMerchantId}' — ignoring`);
     return NextResponse.json({ received: true, routed: false });
   }
-  const { vpSk, webhookSecret } = getTenantCredentials(tenant.id);
+  let credentials;
+  try {
+    credentials = getTenantCredentials(tenant.id);
+  } catch (err) {
+    // This tenant's secret is missing or still the .env.example value. 500,
+    // not 4xx: the delivery is fine; this server is not configured yet, and
+    // the retry succeeds once it is.
+    console.error(
+      `Webhook for tenant ${tenant.id} refused:`,
+      err instanceof Error ? err.message : String(err),
+    );
+    return NextResponse.json({ error: "webhook_secret_not_configured" }, { status: 500 });
+  }
+  const { vpSk, webhookSecret } = credentials;
 
   // Step 4: verify against the tenant's endpoint secret (whsec_*), using
   // the SDK's constructEvent which throws on signature mismatch, stale
@@ -126,10 +157,16 @@ export async function POST(req: NextRequest) {
     // Log only err.message — passing the full err object to a structured
     // logger may serialize signature / HMAC bytes from the VonPayError's
     // diagnostic fields. We never want those in stdout.
-    console.error(
-      `Webhook signature verification failed for tenant ${tenant.id}:`,
-      err instanceof Error ? err.message : String(err),
-    );
+    const message = err instanceof Error ? err.message : String(err);
+    if (err instanceof TypeError) {
+      // The SDK refused the SECRET (empty, an example value, or an API key),
+      // before looking at the delivery. That is a setup problem on this
+      // server, not a bad delivery: answer 500 so the sender retries, rather
+      // than 400, which tells it to give up and drops the event.
+      console.error(`Webhook secret for tenant ${tenant.id} refused by the SDK:`, message);
+      return NextResponse.json({ error: "webhook_secret_not_configured" }, { status: 500 });
+    }
+    console.error(`Webhook signature verification failed for tenant ${tenant.id}:`, message);
     return NextResponse.json({ error: "invalid_signature" }, { status: 400 });
   }
 
@@ -140,10 +177,17 @@ export async function POST(req: NextRequest) {
 
   // Idempotency dedupe — events can be retried by Von Payments; we should
   // process each unique event at most once. `event.id` (`vp_evt_*`) is unique
-  // per outbound event, so it is the whole key. Do NOT compose one from the
-  // payload: a single money movement can emit more than one event, and a
-  // payload-derived key can collapse two distinct events into one.
-  const eventKey = event.id;
+  // per outbound event. Do NOT compose a key from the rest of the payload: a
+  // single money movement can emit more than one event, and a payload-derived
+  // key can collapse two distinct events into one.
+  //
+  // ⛔ Key on the VERIFIED tenant as well as the event id. The signature proves
+  // which tenant signed the event, not that its id is genuine: a tenant can
+  // sign an event that carries ANOTHER tenant's real `vp_evt_*` id (ids show
+  // up in dashboards and logs). Keyed on the id alone, that forged event would
+  // be recorded first, and the victim's genuine delivery then dropped as a
+  // duplicate. With the tenant in the key, one tenant cannot touch another's.
+  const eventKey = `${tenant.id}:${event.id}`;
   if (alreadyCompleted(eventKey)) {
     console.log(`Duplicate webhook ${eventKey} for tenant ${tenant.id} — skipping`);
     return NextResponse.json({ received: true, deduped: true });
@@ -166,19 +210,38 @@ export async function POST(req: NextRequest) {
   // worst version of this bug: no tenant's order would ever be fulfilled, and
   // nothing anywhere would report a fault.
   switch (event.type) {
-    case "charge.succeeded":
-      // Buyer actually paid. Update your CRM's `orders` row → status=paid
-      // and trigger any downstream effects (fulfillment, receipt, etc.).
-      // `event.data.session_id` + `event.data.transaction_id` are available
-      // here; pass them to your systems but avoid logging them verbatim.
+    case "charge.succeeded": {
+      // Buyer actually paid. Find the order on YOUR side, for THIS tenant only.
+      const order = orderOfTenant(tenant.id, event.data.session_id);
+      if (!order) {
+        // Not an order this tenant created here: do not touch anything. Still
+        // ack (200), since a redelivery cannot change the answer.
+        console.warn(`[${tenant.name}] ${event.type} for no order of this tenant — ignored`);
+        break;
+      }
+      // Update your CRM's `orders` row → status=paid and trigger any
+      // downstream effects (fulfillment, receipt, etc.).
+      // `event.data.transaction_id` is available here; pass it to your
+      // systems but avoid logging it verbatim.
+      console.log(`[${tenant.name}] order ${order.orderId} paid`);
       break;
-    case "charge.failed":
-      // Payment did not complete — do NOT fulfill. Update your CRM's
-      // `orders` row → status=failed and surface it in your platform UI.
-      // `event.data.failure_reason` is the buyer-safe explanation.
+    }
+    case "charge.failed": {
+      // Payment did not complete — do NOT fulfill. Same rule: only this
+      // tenant's own order.
+      const order = orderOfTenant(tenant.id, event.data.session_id);
+      if (!order) {
+        console.warn(`[${tenant.name}] ${event.type} for no order of this tenant — ignored`);
+        break;
+      }
+      // Update your CRM's `orders` row → status=failed and surface it in your
+      // platform UI. `event.data.failure_reason` is the buyer-safe explanation.
+      console.log(`[${tenant.name}] order ${order.orderId} failed`);
       break;
+    }
     case "charge.refunded":
-      // Update your CRM's order/transaction → refunded.
+      // Update your CRM's order/transaction → refunded. Look the order up the
+      // same way (`orderOfTenant`): only this tenant's own order.
       //
       // ⚠️ Read `refund_amount` (what THIS event moved) and
       // `amount_refunded_total` (running total), NOT `amount` or `is_partial`.

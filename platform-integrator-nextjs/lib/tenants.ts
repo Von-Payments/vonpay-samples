@@ -52,20 +52,32 @@ export const TENANTS: Tenant[] = [
  *
  * In production, this hits your DB. The sample reads from process.env
  * so each tenant maps to a TENANT_{A|B|C}_VP_SK and TENANT_{A|B|C}_WHSEC
- * pair. Throws if the tenant is unknown or credentials are missing.
+ * pair. Throws if the tenant is unknown, credentials are missing, or they are
+ * still the .env.example values.
  */
 export function getTenantCredentials(tenantId: string): TenantCredentials {
   const upper = tenantId.replace(/^tenant_/, "").toUpperCase();
   const vpSk = process.env[`TENANT_${upper}_VP_SK`];
   const webhookSecret = process.env[`TENANT_${upper}_WHSEC`];
 
-  if (!vpSk || !webhookSecret) {
+  if (!vpSk?.trim() || !webhookSecret?.trim()) {
     throw new Error(
       `No credentials configured for tenant '${tenantId}'. ` +
         `Set TENANT_${upper}_VP_SK and TENANT_${upper}_WHSEC in .env.local.`,
     );
   }
-  return { vpSk, webhookSecret };
+  // The values .env.example ships with are published, so they are no secret:
+  // a webhook verified with one could have been signed by anyone. Refuse them.
+  if (
+    vpSk.trim() === `vp_sk_test_TENANT_${upper}_KEY` ||
+    webhookSecret.trim() === `whsec_TENANT_${upper}_ENDPOINT_SECRET`
+  ) {
+    throw new Error(
+      `Tenant '${tenantId}' still has the .env.example values. ` +
+        `Set TENANT_${upper}_VP_SK and TENANT_${upper}_WHSEC to the tenant's real keys in .env.local.`,
+    );
+  }
+  return { vpSk: vpSk.trim(), webhookSecret: webhookSecret.trim() };
 }
 
 export function getTenant(tenantId: string): Tenant | undefined {

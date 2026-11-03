@@ -12,6 +12,7 @@
  * `paymentIntents.capture`, and `refunds.create` — and threads an
  * `idempotencyKey` through the request options so retries collapse cleanly.
  */
+import { randomUUID } from "node:crypto";
 import {
   VonPayCheckout,
   VonPayError,
@@ -75,7 +76,7 @@ function logError(label: string, err: unknown): void {
 }
 
 async function main(): Promise<void> {
-  const runId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const runId = randomUUID();
   const createKey = `pi-create-${runId}`;
   const captureKey = `pi-capture-${runId}`;
   const refundKey = `pi-refund-${runId}`;
