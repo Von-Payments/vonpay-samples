@@ -42,11 +42,12 @@ Server starts on `http://localhost:3000`. Hit `GET /` for a route reference.
 
 ### 3. Test locally
 
-The fastest way to test verification end-to-end is the CLI - it signs a synthetic event with your endpoint's `whsec_*` exactly the way the live delivery engine does, and it can target `localhost` directly (no tunnel needed):
+The fastest way to test verification end-to-end is the CLI: it signs a synthetic event the same way the live delivery engine does (the same `x-vonpay-signature` header and HMAC), and it can target `localhost` directly (no tunnel needed). The CLI never signs with your API key. Give it the secret your server verifies with, the `VON_PAY_WEBHOOK_SECRET` in your `.env`, through `VONPAY_CLI_SIGNING_SECRET` (or `--signing-secret`); without one it makes a new random secret each run and prints it, and this server would reject the event:
 
 ```bash
 npm install -g @vonpay/checkout-cli
 vonpay checkout login
+export VONPAY_CLI_SIGNING_SECRET=whsec_your_endpoint_signing_secret   # the same value as VON_PAY_WEBHOOK_SECRET in .env
 vonpay checkout trigger charge.succeeded --url http://localhost:3000/webhooks/vonpay
 ```
 
