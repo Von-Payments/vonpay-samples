@@ -2,15 +2,15 @@
 
 > Machine-readable index for AI agents integrating the Von Payments Checkout API.
 > Runnable, copy-pasteable sample apps live in this repo. Factual only.
-> Checked against the samples' code and the published SDK types on 2026-10-02.
+> Checked against the samples' code and the published SDK types on 2026-11-03.
 
-## SDK release lines (checked 2026-10-02)
+## SDK release lines (checked 2026-11-03)
 
-- @vonpay/checkout-node - samples pin ^3.4.0 (lockfiles 3.4.0); current 3.4.0 (npm)  # Node / TypeScript server SDK
-- vonpay-checkout - samples pin >=3.4,<4; current 3.4.0 (PyPI)                      # Python server SDK
-- @vonpay/checkout-mcp - sample pins ^5.2.0 (lockfile 5.2.0); current 5.2.0 (npm)  # MCP server for AI-agent runtimes
-- @vonpay/checkout-cli - not pinned by any sample; current 0.11.0 (npm)            # CLI for ad-hoc testing / agent tool use
-- @vonpay/test-cards - not pinned by any sample; current 0.2.0 (npm)               # the sandbox test cards as data
+- @vonpay/checkout-node - samples pin ^4.0.0, webhooks-node ^4.4.0 (lockfiles 4.4.0); current 4.5.0 (npm)  # Node / TypeScript server SDK
+- vonpay-checkout - samples pin >=4.0,<5; current 4.5.0 (PyPI)                      # Python server SDK
+- @vonpay/checkout-mcp - sample pins ^5.4.0 (lockfile 5.4.0); current 6.4.2 (npm)  # MCP server for AI-agent runtimes; the sample pins the 5.x line
+- @vonpay/checkout-cli - not pinned by any sample; current 0.18.0 (npm)            # CLI for ad-hoc testing / agent tool use
+- @vonpay/test-cards - not pinned by any sample; current 0.2.1 (npm)               # the sandbox test cards as data
 - vora.js - CDN only at https://js.vonpay.com/v1/vora.js                          # browser SDK for embedded card fields; NO npm package
 
 Never pin a 0.x version: a caret on 0.x locks the minor and the pin can never
@@ -30,7 +30,7 @@ assuming. "Current" above is a point-in-time reading.
 - payment-intents-3ds - 3DS / requires_action handling: branch on status, redirect to issuer challenge, confirm terminal state from webhook. → @vonpay/checkout-node
 - saved-cards-mit - Vault a card off-session, anchor a cardholder-initiated charge, then rebill with the mit block (recurring / subscriptions). → @vonpay/checkout-node
 - checkout-embedded - Embedded Fields (in-page card fields) via the CDN <script>: collect card in-page, tokenize, charge the vp_pmt_* token server-side. → vora.js (CDN) + @vonpay/checkout-node
-- webhooks-node - Webhook receiver: verify signature, idempotent processing, replay-window enforcement. → @vonpay/checkout-node
+- webhooks-node - Webhook receiver: verify signature, idempotent processing, replay-window enforcement, subscription.* handlers (renewal orders, past due, cancel). → @vonpay/checkout-node
 - agent-mcp - Wire @vonpay/checkout-mcp into an MCP-aware runtime (Claude Code, Cursor, Claude Desktop, custom agent). Config-only, no runtime to host. → @vonpay/checkout-mcp
 
 ## Guardrails (get these right)
@@ -45,18 +45,50 @@ assuming. "Current" above is a point-in-time reading.
    over the RAW request body; it verifies and parses in one call.
    The event is an envelope `{ id: "vp_evt_*", type, created, livemode,
    merchant_id, data }`: payload under `data`, merchant id is `merchant_id`.
-   Dedupe on `id`.
-   Event names in the 3.x SDK's typed union: charge.succeeded, charge.failed,
+   Order per delivery (as webhooks-node does): verify the signature (400 on
+   failure) → if `event.test_event === true`, return 2xx and do nothing else
+   (a "Send test event" delivery is signed like a real one and can carry a
+   real session's ids; the field is absent, not false, on real events;
+   livemode false does NOT mean test event) → dedupe on `id` in a durable,
+   shared store, recording the id only AFTER the handler succeeded (recording
+   on arrival turns a failed first attempt into a permanent drop) → handle.
+   One payment can emit several events with different ids (e.g. charge.* and
+   payment_intent.*), so make fulfilment idempotent on your order, not only on
+   the event id. Answer 2xx to unknown event types, log, do nothing.
+   Event names in the 4.x SDK's typed union: charge.succeeded, charge.failed,
    charge.refunded, refund.failed, payment_intent.succeeded,
    payment_intent.failed, payment_intent.cancelled, payment_intent.authorized,
-   session.succeeded, session.failed, dispute.created, dispute.won,
-   dispute.lost, application.approved, application.denied,
-   merchant.ready_for_payments, payout.paid, payout.failed,
-   mirror.order.created.
+   payment_intent.held_for_review, session.succeeded, session.failed,
+   dispute.created, dispute.won, dispute.lost, application.approved,
+   application.denied, merchant.ready_for_payments, payout.paid,
+   payout.failed, mirror.order.created, payment_method.attached,
+   merchant.card_testing_suspected, subscription.created,
+   subscription.renewed, subscription.payment_failed, subscription.cancelled,
+   subscription.updated.
    payment_intent.authorized fires only for a captureMethod "manual" payment:
    the money is held, not taken. Do not fulfil on it; capture or void.
-   The samples handle charge.* + refund.failed (hosted checkout / refunds) and
-   payment_intent.succeeded / payment_intent.failed (server-driven flow).
+   Opt-in (an endpoint gets each only when it lists it by name; "*" does not
+   count; never added to an existing endpoint):
+   payment_intent.held_for_review (do NOT fulfil on it; while held, retrieve()
+   reads requires_action; the outcome arrives as the normal succeeded / failed
+   events; sent once, to endpoints subscribed then; selectable only once the
+   merchant dashboard lists it), payment_method.attached (not selectable yet),
+   merchant.card_testing_suspected (live only; an alert, nothing was blocked;
+   hold fulfilment of approved payments you do not recognise), and the five
+   subscription.* events (typed from SDK 4.4.0; webhooks-node pins ^4.4.0).
+   webhooks-node handles charge.* + refund.failed (hosted checkout / refunds)
+   and the five subscription.* events; payment-intents-3ds confirms the
+   terminal state from payment_intent.succeeded / payment_intent.failed.
+   Subscriptions: build the renewal order from subscription.renewed (keyed by
+   subscription_id + billing_cycle). charge.* / payment_intent.* carry
+   subscription_id: set when Von Payments charged a subscription (renewal,
+   "bill now", overdue charge after a card update), null on every other
+   payment including the sign-up. Do not fulfil or fail an order from a
+   payment event with subscription_id set (charge.refunded is still a
+   refund). The last subscription.payment_failed (status "failed") ends the
+   membership and no subscription.cancelled follows. Events arrive in no
+   guaranteed order: correlate on payment_intent_id, and never let an event
+   older (by `created`) than the state you applied overwrite it.
    There is NO session.expired and NO refund.created event; do not claim them
    (a refund arrives as charge.refunded).
    Do NOT subscribe an endpoint to session.succeeded / session.failed: they are
@@ -89,17 +121,31 @@ assuming. "Current" above is a point-in-time reading.
    A declined payment is signed just as authentically as an approved one. Do
    not verify the redirect yourself, and do not try to verify it with an
    `ss_*` secret: the redirect is signed with a platform-wide secret, so a
-   merchant-side check can never match. Call
+   merchant-side check can never match.
+   Match the return to an order YOUR server created first: confirmReturn
+   answers for ANY session on your account, so a success URL copied from
+   another paid order would otherwise read as paid. Take the expected values
+   from your server's records only, never from the URL. They are optional and
+   omitting them turns the check off: with no recorded order for this
+   browser, refuse the page rather than call confirmReturn unchecked.
+   expectedAmount is in minor units. Call
    `sessions.confirmReturn(params, undefined, { expectedSuccessUrl,
-   expectedKeyMode, maxAgeSeconds })` (Python: `sessions.confirm_return`). It
-   reads the session from the server and returns `{ paid, status, reason,
-   sessionId, amount, signatureValid }`. Branch three ways:
-   paid → fulfil once (dedupe on sessionId);
+   expectedKeyMode, maxAgeSeconds, expectedSessionId, expectedAmount,
+   expectedCurrency })` (Python: `sessions.confirm_return` with
+   `expected_session_id`, `expected_amount`, `expected_currency`). It reads
+   the session from the server and returns `{ paid, status, reason,
+   sessionId, amount, currency, signatureValid }`. Branch (HTTP codes are the
+   Express / Flask samples'; the Next.js samples render the same pages):
+   reason missing_session / session_mismatch / amount_mismatch → not this
+   order's payment: not paid, but do not say it failed (HTTP 400);
+   paid → show the confirmation. The charge.succeeded webhook is the reliable
+   fulfilment trigger (buyers close the tab); if you also fulfil here, call
+   ONE idempotent fulfilment function from both paths, keyed on your order;
    reason == "still_pending" → HTTP 200, neutral "confirming your payment"
    (3-D Secure returns the buyer before the charge settles; do NOT say it
    failed, they will pay twice);
    otherwise not paid → HTTP 402.
-   If the lookup throws, log it and show the neutral page. Render
+   If the lookup throws, log it and show a neutral page (HTTP 503). Render
    `outcome.amount` from the server, never `params.amount` from the URL.
 
 5. Sandbox test cards.
@@ -112,7 +158,8 @@ assuming. "Current" above is a point-in-time reading.
    4242 4242 4242 4242 are declined. Always send a return URL: a card payment
    can pause for 3-D Secure. If the dashboard shows different test cards for
    the sandbox, use those. Same list as data: @vonpay/test-cards; from an
-   agent: the MCP list_test_cards tool (@vonpay/checkout-mcp 5.2.0+).
+   agent: the MCP vonpay_checkout_list_test_cards tool (in the pinned
+   @vonpay/checkout-mcp 5.4.0 and the current 6.4.2).
 
 6. Amounts are minor units.
    Never divide or multiply by 100 (JPY has 0 decimals, KWD has 3). Use the
@@ -121,12 +168,13 @@ assuming. "Current" above is a point-in-time reading.
    a code the API does not know or whose decimals are still being confirmed,
    so show raw minor units rather than convert.
 
-## Type coverage on the 3.x SDK
+## Type coverage on the 4.x SDK
 
 `paymentMethod`, `returnUrl`, `buyerId`, `mit`, `captureMethod`, `sessionId`
 are typed on `CreatePaymentIntentParams`. `PaymentIntent.nextAction` is the
 structured `{ type: "redirect_to_url", redirectToUrl: { url } }` object (or
-null). `payment_intent.*` events are in the typed `WebhookEvent` union. None
+null). `payment_intent.*` and `subscription.*` events are in the typed
+`WebhookEvent` union. None
 of the samples carry the old local type bridges any more; do not
 reintroduce them.
 

@@ -1,10 +1,14 @@
 name: CI
 
 on:
+  # Docs-only changes (the root guide files, any README) build nothing, so they
+  # skip the 12 sample builds. The leak check (leak-check.yml) still runs on them.
   push:
     branches: [main]
+    paths-ignore: ["**.md", "llms.txt", "LICENSE"]
   pull_request:
     branches: [main]
+    paths-ignore: ["**.md", "llms.txt", "LICENSE"]
 
 jobs:
   node-samples:

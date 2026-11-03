@@ -18,12 +18,12 @@ Official runnable sample integrations for the Von Payments Checkout API. Clone a
 | [`payment-intents-3ds`](./payment-intents-3ds) | Node 20+ / Express 5 / TypeScript | **3DS / `requires_action`** - branch on intent status, top-level redirect to the issuer challenge, confirm terminal state from the webhook | Card flows that hit a 3-D Secure challenge; anyone who must handle `requires_action` correctly |
 | [`saved-cards-mit`](./saved-cards-mit) | Node 20+ / TypeScript | **Saved cards + MIT** - vault a card off-session, anchor a cardholder-initiated charge, rebill with the `mit` block | Subscriptions, recurring billing, stored-credential rebills |
 | [`checkout-embedded`](./checkout-embedded) | Node 20+ / Express 5 / TypeScript + CDN `<script>` | **Embedded Fields (in-page card fields)** - in-page card collection via `vora.js`, tokenize, charge the `vp_pmt_*` token server-side | In-page checkout without a redirect; staying out of PCI scope while keeping your own UI |
-| [`webhooks-node`](./webhooks-node) | Node 20+ / Express 5 / TypeScript | **Webhook receiver** - verify the `t=,v1=` signature with the `whsec_*` secret, idempotent processing, replay-window enforcement | Any integration that needs to react to async events (`charge.*`, `refund.failed`, `payment_intent.*`) |
+| [`webhooks-node`](./webhooks-node) | Node 20+ / Express 5 / TypeScript | **Webhook receiver** - verify the `t=,v1=` signature with the `whsec_*` secret, idempotent processing, replay-window enforcement | Any integration that needs to react to async events (`charge.*`, `refund.failed`, `payment_intent.*`, `subscription.*`) |
 | [`agent-mcp`](./agent-mcp) | MCP config (no runtime) | **AI-agent integration** - wire `@vonpay/checkout-mcp` into Claude Code, Cursor, Claude Desktop, or any MCP runtime | Building (or coding with) an agent that creates sessions and drives the payment lifecycle |
 
 Each sample demonstrates the full checkout lifecycle:
 - **Session creation** - server-side, with line items + buyer info
-- **Return confirmation** - `sessions.confirmReturn()` reads the session status from the server; the samples branch on `paid` / `still_pending`, never on the redirect's signature (a declined payment is signed just as authentically as an approved one)
+- **Return confirmation** - `sessions.confirmReturn()` reads the session status from the server; the samples first match the return to the order they started (`expectedSessionId`, `expectedAmount`, `expectedCurrency`), then branch on `paid` / `still_pending`, never on the redirect's signature (a declined payment is signed just as authentically as an approved one)
 - **Webhook handling** - HMAC-SHA256 signature verification with the per-endpoint `whsec_*` secret + replay window
 - **Production-shaped error handling** - typed `VonPayError` from `@vonpay/checkout-node`, decline-code awareness
 
@@ -85,17 +85,17 @@ The samples themselves are written to be agent-paste-friendly: short files, expl
 
 ## SDKs
 
-| SDK | Package | Samples pin | Current release (checked 2026-10-02) | Used in |
+| SDK | Package | Samples pin | Current release (checked 2026-11-03) | Used in |
 |---|---|---|---|---|
-| Node.js | [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) | `^3.4.0` (lockfiles `3.4.0`) | `3.4.0` | nextjs, express, paybylink-nextjs, platform-integrator-nextjs, payment-intents-node, payment-intents-3ds, saved-cards-mit, checkout-embedded, webhooks-node |
-| Python | [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) | `>=3.4,<4` | `3.4.0` | flask, payment-intents-python |
-| CLI | [`@vonpay/checkout-cli`](https://www.npmjs.com/package/@vonpay/checkout-cli) | not pinned | `0.11.0` | install separately for ad-hoc testing or agent-tool use |
-| MCP | [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp) | `^5.2.0` (lockfile `5.2.0`) | `5.2.0` | agent-mcp; install in an MCP-aware runtime (Claude Desktop, Cursor, etc.) |
-| Test cards | [`@vonpay/test-cards`](https://www.npmjs.com/package/@vonpay/test-cards) | not pinned | `0.2.0` | the sandbox test cards as data, for your own tests or tooling |
+| Node.js | [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) | `^4.0.0`; webhooks-node `^4.4.0` (lockfiles `4.4.0`) | `4.5.0` | nextjs, express, paybylink-nextjs, platform-integrator-nextjs, payment-intents-node, payment-intents-3ds, saved-cards-mit, checkout-embedded, webhooks-node |
+| Python | [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) | `>=4.0,<5` | `4.5.0` | flask, payment-intents-python |
+| CLI | [`@vonpay/checkout-cli`](https://www.npmjs.com/package/@vonpay/checkout-cli) | not pinned | `0.18.0` | install separately for ad-hoc testing or agent-tool use |
+| MCP | [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp) | `^5.4.0` (lockfile `5.4.0`) | `6.4.2` | agent-mcp (pins the 5.x line while 6.x is current); install in an MCP-aware runtime (Claude Desktop, Cursor, etc.) |
+| Test cards | [`@vonpay/test-cards`](https://www.npmjs.com/package/@vonpay/test-cards) | not pinned | `0.2.1` | the sandbox test cards as data, for your own tests or tooling |
 
 Embedded card fields load the browser SDK (`vora.js`) from the CDN `<script>` at `https://js.vonpay.com/v1/vora.js` - there is no npm package for it; see [`checkout-embedded`](./checkout-embedded).
 
-The server SDKs are on their `3.x` line. Never pin a `0.x` version: a caret range on `0.x` locks the minor, so the pin can never move. These samples sat on `^0.9.0` for a year that way. Pins are bumped in the SDK repository the samples are published from, then synced here (see [Contributing](#contributing)); check a sample's `package.json` / `requirements.txt` for the range it's actually built against.
+The server SDKs are on their `4.x` line. Never pin a `0.x` version: a caret range on `0.x` locks the minor, so the pin can never move. These samples sat on `^0.9.0` for a year that way. Pins are bumped in the SDK repository the samples are published from, then synced here (see [Contributing](#contributing)); check a sample's `package.json` / `requirements.txt` for the range it's actually built against.
 
 ## Roadmap
 
