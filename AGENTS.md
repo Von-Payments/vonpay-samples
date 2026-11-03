@@ -17,7 +17,7 @@ SDK's `.d.ts` files win over this page.
 |---|---|---|---|
 | `@vonpay/checkout-node` | `^4.0.0`; `webhooks-node` `^4.4.0` (lockfiles at `4.4.0`) | `4.5.0` | npm - Node / TypeScript server SDK |
 | `vonpay-checkout` | `>=4.0,<5` | `4.5.0` | PyPI - Python server SDK |
-| `@vonpay/checkout-mcp` | `^5.4.0` (lockfile at `5.4.0`) | `6.4.2` | npm - MCP server (`agent-mcp` sample; it pins the 5.x line while 6.x is current - check the package's changelog before upgrading) |
+| `@vonpay/checkout-mcp` | `^6.4.2` (lockfile at `6.4.2`) | `6.4.2` | npm - MCP server (`agent-mcp` sample; 26 tools, including payment reports and subscription changes; `VONPAY_MCP_TOOLS=read` registers only the tools that read; on a live key every money action and subscription change waits for a person's approval in the MCP host's prompt) |
 | `@vonpay/checkout-cli` | not pinned by any sample | `0.18.0` | npm - CLI |
 | `@vonpay/test-cards` | not pinned by any sample | `0.2.1` | npm - the sandbox test cards as data |
 | `vora.js` | CDN only, `https://js.vonpay.com/v1/vora.js` | `/v1/` channel auto-ships patches | browser SDK for embedded card fields - **no npm package** |
@@ -227,8 +227,8 @@ Rules of thumb:
    pause for 3-D Secure, so always send a return URL. If the merchant's dashboard
    shows different test cards for their sandbox, those win. The same list is
    published as data in `@vonpay/test-cards`, and the MCP server's
-   `vonpay_checkout_list_test_cards` tool returns it (present in the pinned
-   `@vonpay/checkout-mcp` 5.4.0 and in the current 6.4.2).
+   `vonpay_checkout_list_test_cards` tool returns it (in
+   `@vonpay/checkout-mcp` 6.4.2, which the sample pins).
 
 ## What the 4.x types cover
 

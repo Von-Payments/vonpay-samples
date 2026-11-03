@@ -8,7 +8,7 @@
 
 - @vonpay/checkout-node - samples pin ^4.0.0, webhooks-node ^4.4.0 (lockfiles 4.4.0); current 4.5.0 (npm)  # Node / TypeScript server SDK
 - vonpay-checkout - samples pin >=4.0,<5; current 4.5.0 (PyPI)                      # Python server SDK
-- @vonpay/checkout-mcp - sample pins ^5.4.0 (lockfile 5.4.0); current 6.4.2 (npm)  # MCP server for AI-agent runtimes; the sample pins the 5.x line
+- @vonpay/checkout-mcp - sample pins ^6.4.2 (lockfile 6.4.2); current 6.4.2 (npm)  # MCP server for AI-agent runtimes; 26 tools incl. payment reports + subscription changes; VONPAY_MCP_TOOLS=read for read-only; live-key money actions need a person's approval
 - @vonpay/checkout-cli - not pinned by any sample; current 0.18.0 (npm)            # CLI for ad-hoc testing / agent tool use
 - @vonpay/test-cards - not pinned by any sample; current 0.2.1 (npm)               # the sandbox test cards as data
 - vora.js - CDN only at https://js.vonpay.com/v1/vora.js                          # browser SDK for embedded card fields; NO npm package
@@ -158,8 +158,8 @@ assuming. "Current" above is a point-in-time reading.
    4242 4242 4242 4242 are declined. Always send a return URL: a card payment
    can pause for 3-D Secure. If the dashboard shows different test cards for
    the sandbox, use those. Same list as data: @vonpay/test-cards; from an
-   agent: the MCP vonpay_checkout_list_test_cards tool (in the pinned
-   @vonpay/checkout-mcp 5.4.0 and the current 6.4.2).
+   agent: the MCP vonpay_checkout_list_test_cards tool (in
+   @vonpay/checkout-mcp 6.4.2, which the sample pins).
 
 6. Amounts are minor units.
    Never divide or multiply by 100 (JPY has 0 decimals, KWD has 3). Use the
