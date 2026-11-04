@@ -25,7 +25,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) - the root redirects to `/links`. Fill in the form, click **Create pay link**, share the URL or QR. When the buyer completes payment, `/api/webhooks` receives `charge.succeeded` and flips the link's status to `paid`. The detail page polls every 5 seconds while the status is `pending`, so the badge updates without a manual refresh.
+Open [http://localhost:3000](http://localhost:3000) - the root redirects to `/links`. Fill in the form, click **Create pay link**, share the URL or QR. When the buyer completes payment, `/api/webhooks` receives `charge.succeeded` and flips the link's status to `paid`. The detail page polls every 5 seconds, so the badge updates without a manual refresh, including after a refund or a second payment.
 
 > **Dev-mode caveat:** the in-memory store in `lib/storage.ts` resets on every Next.js dev-server hot-reload (any file save). Create a link, then avoid editing files until you're done testing, or swap in a persistent store.
 
@@ -39,6 +39,8 @@ ngrok http 3000
 # Register https://<id>.ngrok.io/api/webhooks in /dashboard/developers/webhooks
 ```
 
+Subscribe the endpoint to `charge.succeeded`, `charge.failed` and `charge.refunded`. Without `charge.refunded`, a refunded link keeps saying `paid`.
+
 Without a webhook registered, the status stays `pending` - the return page at `/confirm` still confirms the payment with an authenticated session read, but the dashboard won't know the session completed.
 
 ## How it works
@@ -46,6 +48,7 @@ Without a webhook registered, the status stays `pending` - the return page at `/
 ```
 app/page.tsx                       - redirects to /links
 app/links/page.tsx                 - dashboard (client): form + table of created links
+app/links/link-status.tsx          - status badge + refund and review notes (dashboard and detail)
 app/links/[id]/page.tsx            - detail (server): URL, QR SVG, status poller, metadata
 app/links/[id]/status-poller.tsx   - client component: polls /api/links/[id] every 5s
 app/confirm/page.tsx               - server-side return confirmation (confirmReturn)
@@ -63,7 +66,25 @@ The `sessions.create()` call is the same one the cart → redirect sample makes 
 
 - **The SDK can do this check for you.** This sample passes the link record's amount and currency to `confirmReturn()` as `expectedAmount` + `expectedCurrency` (SDK 4.0.0+); a session for a different amount or currency comes back as not paid (`reason: "amount_mismatch"`) and gets the "couldn't match" page. Keep the link record either way: it is where the expected values come from.
 
-Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header - there is no separate timestamp header). `vonpay.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent` discriminated union. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) - not your API key. **Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^4.5.0` covers it). This sample listens for `charge.succeeded` and `charge.failed` to update the link's status. **Paid is final:** a `charge.failed` that arrives after the payment went through (a declined first attempt delivered late, say) never turns a paid link back to failed. **Each event is handled once:** the handler dedupes on the event `id` (`vp_evt_*`), so a redelivery or a manual resend is acknowledged and skipped; the id is recorded only after the event was processed, so a delivery that failed part-way is retried for real. The handler also refuses every delivery (500, so it is retried later) while `VON_PAY_WEBHOOK_SECRET` is empty or still the `.env.example` placeholder. ⚠️ **Not `session.succeeded`** - the server emits `session.*` internally, but those keys are absent from the merchant subscription catalog, which accepts an unknown event key, stores nothing and returns success. An endpoint subscribed to one receives nothing, forever, and every paid link would sit at `pending`.
+Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header - there is no separate timestamp header). `vonpay.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent` discriminated union. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) - not your API key. **Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^4.5.0` covers it). This sample listens for `charge.succeeded`, `charge.failed` and `charge.refunded` to update the link's status (see [Link states](#link-states)). **Each event is handled once:** the handler dedupes on the event `id` (`vp_evt_*`), so a redelivery or a manual resend is acknowledged and skipped; the id is recorded only after the event was processed, so a delivery that failed part-way is retried for real. The handler also refuses every delivery (500, so it is retried later) while `VON_PAY_WEBHOOK_SECRET` is empty or still the `.env.example` placeholder. ⚠️ **Not `session.succeeded`** - the server emits `session.*` internally, but those keys are absent from the merchant subscription catalog, which accepts an unknown event key, stores nothing and returns success. An endpoint subscribed to one receives nothing, forever, and every paid link would sit at `pending`.
+
+## Link states
+
+| Status | What it means | What moves a link there |
+|---|---|---|
+| `pending` | Nobody has paid | The link was created |
+| `failed` | An attempt failed, and the buyer can try again | `charge.failed` on a pending link |
+| `paid` | One payment went through | `charge.succeeded`. A partial refund keeps `paid` and records the refunded amount |
+| `refunded` | That one payment was refunded in full | `charge.refunded` for that payment, once the total refunded reaches the payment's amount |
+| `needs_review` | The events do not add up to one payment. A person checks before you fulfil or refund | A second payment, a refund of a payment this link does not hold, or a refund of an unknown amount |
+
+- **A payment is never undone by a failure.** A `charge.failed` that arrives late (a declined first attempt, say) never changes a `paid`, `refunded` or `needs_review` link.
+- **A second success is compared by transaction id.** The same id is the same payment reported again, and nothing changes. A different id is a second payment: the link goes to `needs_review` and keeps both ids. Compare `vp_tx_id`. `transaction_id` is the fallback, because two events for one payment can carry different values in it.
+- **A refund is matched to a payment, not to the link.** A checkout session takes one payment. If a second one is captured anyway (a form left open in another tab, say), the payment system can refund it automatically, and you see a refund you did not issue. Its `reason` does not identify it; its transaction id does. The first payment still stands, so the link goes to `needs_review` and never to `refunded`. Do not charge the buyer again.
+- **Full or partial comes from the totals.** Compare `amount_refunded_total` with `original_charge_amount`. Do not read `amount` or `is_partial`: on a second partial refund, they differ between payment connections. If `amount_refunded_total` is `null`, the sample adds up `refund_amount`. If both are `null`, the link goes to `needs_review`.
+- **`abandoned_payment_reversed` changes nothing here.** That refund or released hold is for an attempt that was already closed, and you never got its `charge.succeeded`.
+
+This sample has no button to close a review. Give your staff one in your own system.
 
 ## Security notes
 

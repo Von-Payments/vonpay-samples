@@ -58,8 +58,12 @@ export interface AppDeps {
 
 interface CheckoutRecord {
   sessionId: string;
+  /** When the session stops working. Absent means unknown. */
+  expiresAt?: string;
   /** The payment intent this server created, once it has charged. */
   intentId?: string;
+  /** The last charge was a confirmed decline, so no money moved. */
+  lastChargeFailed?: boolean;
   /** A charge request is running right now (set before the API call). */
   charging?: boolean;
   /**
@@ -96,6 +100,17 @@ function outcomeForIntent(status: PaymentIntentStatus): Outcome {
     case "cancelled":
       return "failed";
   }
+}
+
+/**
+ * True only when nothing can be lost by replacing this checkout: its session
+ * has expired, and no charge on it succeeded, is running, or has a lost answer.
+ */
+function canStartOver(checkout: CheckoutRecord): boolean {
+  const expiresAt = Date.parse(checkout.expiresAt ?? "");
+  if (Number.isNaN(expiresAt) || expiresAt > Date.now()) return false;
+  if (checkout.charging === true || checkout.chargeUnresolved === true) return false;
+  return checkout.intentId === undefined || checkout.lastChargeFailed === true;
 }
 
 export function createApp({ client, publishableKey, apiBase, trustProxy = false }: AppDeps): Express {
@@ -137,8 +152,21 @@ export function createApp({ client, publishableKey, apiBase, trustProxy = false 
    * Create a checkout session. The browser calls this, gets back the
    * session id, then loads the card field against it with the publishable
    * key. The session carries the amount/currency the embed will charge.
+   *
+   * ⛔ ONE CHECKOUT PER BROWSER. A second tab or a reload sends the cookie and
+   * gets the SAME session back, so the one-charge lock in /api/charge covers it.
+   * This applies after a payment too: the server cannot tell whether the browser
+   * saw the answer, and a new checkout here would let the buyer pay twice. A
+   * browser with no cookie still gets a new checkout, because this demo has no
+   * order to tie it to. A real shop keys the session on its own order id.
    */
   app.post("/api/create-session", async (req: Request, res: Response) => {
+    const open = readCheckout(req);
+    if (open !== undefined && !canStartOver(open)) {
+      res.status(200).json({ session_id: open.sessionId });
+      return;
+    }
+
     // Stand-in for YOUR order id. In a real app, create the order first and use its id.
     const orderId = `order_${randomUUID()}`;
     try {
@@ -149,12 +177,12 @@ export function createApp({ client, publishableKey, apiBase, trustProxy = false 
           // Tag the session so it's identifiable in your dashboard.
           metadata: { sample: "checkout-embedded", order_id: orderId },
         },
-        // Key on YOUR order id. Here orderId is made per request, so this only dedupes the SDK's own retry of this call; to dedupe a double-click or refresh, create the order first and reuse its id.
+        // Key on YOUR order id. Here orderId is made per new checkout, so this only dedupes the SDK's own retry of this call. With your own order id, a browser that lost its cookie gets the same session too.
         { idempotencyKey: `session:${orderId}` },
       );
 
       const checkoutId = randomUUID();
-      checkouts.set(checkoutId, { sessionId: session.id });
+      checkouts.set(checkoutId, { sessionId: session.id, expiresAt: session.expiresAt });
       // The cookie is the only thing that lets a browser charge THIS
       // checkout. httpOnly: page scripts cannot read it. sameSite "lax": a
       // cross-site POST to /api/charge does not carry it. secure: whenever
@@ -269,6 +297,7 @@ export function createApp({ client, publishableKey, apiBase, trustProxy = false 
         },
       );
       checkout.intentId = intent.id;
+      checkout.lastChargeFailed = outcomeForIntent(intent.status) === "failed";
       res.status(201).json({
         intent_id: intent.id,
         status: intent.status,

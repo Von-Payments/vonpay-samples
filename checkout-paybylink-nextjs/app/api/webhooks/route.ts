@@ -3,8 +3,8 @@ import { VonPayCheckout } from "@vonpay/checkout-node";
 import {
   eventAlreadyHandled,
   markEventHandled,
+  recordRefund,
   updateStatus,
-  type LinkStatus,
 } from "@/lib/storage";
 
 const apiKey = process.env.VON_PAY_SECRET_KEY!;
@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ received: true, deduped: true });
   }
 
-  let nextStatus: LinkStatus | undefined;
+  let nextStatus: "paid" | "failed" | undefined;
   let transactionId: string | undefined;
   let sessionId: string | undefined;
   // Every field on `event.data` is nullable — the processor does not always
@@ -96,7 +96,10 @@ export async function POST(req: NextRequest) {
   // at `pending` for good. `charge.*` is the subscribable family.
   if (event.type === "charge.succeeded") {
     nextStatus = "paid";
-    transactionId = event.data.transaction_id ?? undefined;
+    // `vp_tx_id` is the id to compare. `transaction_id` is not one id space:
+    // two events for the SAME payment can carry different values in it, so it
+    // is only the fallback for an event with no `vp_tx_id`.
+    transactionId = event.data.vp_tx_id ?? event.data.transaction_id ?? undefined;
     sessionId = event.data.session_id ?? undefined;
   } else if (event.type === "charge.failed") {
     nextStatus = "failed";
@@ -107,11 +110,37 @@ export async function POST(req: NextRequest) {
   // delivery anyway — retrying cannot conjure the field, and a 5xx here would
   // just loop the delivery engine forever.
   if (nextStatus && sessionId) {
-    // A paid link stays paid, even if a failed attempt's event lands after it
+    // A paid link stays paid, even if a failed attempt's event lands after it.
+    // A second success with a different transaction id goes to needs_review
     // (see updateStatus in lib/storage.ts).
     const updated = updateStatus(sessionId, nextStatus, transactionId);
     // Log only the merchant-side identifiers (link id + status). Vonpay
     // session IDs are deep-link tokens — keep them out of general logs.
+    console.log(
+      `webhook ${event.type} →`,
+      updated ? `link ${updated.id} → ${updated.status}` : "(no matching link)",
+    );
+  }
+
+  // One event per refund. Read `amount_refunded_total` and `refund_amount`. Do
+  // NOT read `amount` or `is_partial`: on a second partial refund some payment
+  // connections report a running total there and others report one refund, and
+  // nothing on the event says which.
+  //
+  // `abandoned_payment_reversed` is the payment system giving back a payment
+  // that was already closed (you never got its `charge.succeeded`), or releasing
+  // its hold. It says nothing about the payment that paid this link.
+  if (
+    event.type === "charge.refunded" &&
+    event.data.session_id &&
+    event.data.reason !== "abandoned_payment_reversed"
+  ) {
+    const updated = recordRefund(event.data.session_id, {
+      transactionId: event.data.vp_tx_id ?? event.data.transaction_id ?? undefined,
+      refundedTotal: event.data.amount_refunded_total,
+      refundAmount: event.data.refund_amount,
+      originalAmount: event.data.original_charge_amount,
+    });
     console.log(
       `webhook ${event.type} →`,
       updated ? `link ${updated.id} → ${updated.status}` : "(no matching link)",

@@ -23,7 +23,8 @@ server.ts            Reads env, creates the SDK client, starts the server.
 app.ts               The routes:
                        GET  /api/config          → publishable key + amount
                        POST /api/create-session  → mints a session (secret key)
-                                                   + a cookie naming this checkout
+                                                   + a cookie naming this checkout;
+                                                   the same browser gets the same one
                        POST /api/charge          → charges a vp_pmt_* token,
                                                    at most once per checkout
                        (static files from ./public)
@@ -77,11 +78,30 @@ your secret key on every call. Behind a TLS-terminating proxy you run, set
 `VON_PAY_TRUST_PROXY` to its hop count (e.g. `1`) so the cookie is marked
 `Secure`.
 
-`POST /api/create-session` is a dev stub. It needs no sign-in, it creates a
-new session on every call, and it adds an entry to an in-memory map that
-nothing ever removes. Before deploying, create the session from your own
-order (for a signed-in buyer, from a cart priced on your server), keep the
-checkout on that order's row, and rate-limit the route like `/api/charge`.
+**One browser, one checkout.** A second tab or a reload sends the cookie, so
+`POST /api/create-session` returns the same session and the one-charge lock
+covers it. This stays true after a payment, because the server cannot tell
+whether the browser saw the answer. The route makes a new checkout only when
+the cookie is missing, or when the session expired with no payment on it. To
+try another payment in this demo, clear the `embedded_checkout` cookie or
+restart the server.
+
+`POST /api/create-session` is a dev stub. It needs no sign-in, and it adds an
+entry to an in-memory map that nothing ever removes. Two things must change
+before you deploy:
+
+- **Key the session on your own order id.** The cookie protects one browser
+  only. A buyer who lost the cookie or moved to another device gets a new
+  checkout here, and can pay a second time. Create the session from your own
+  order (for a signed-in buyer, from a cart priced on your server), and send
+  the order id in the idempotency key, so one order can only ever have one
+  session.
+- **Persist the charge lock in the order row.** The lock in `/api/charge` is
+  in memory, so it is per process. A second server process does not see it, and
+  a restart forgets it. Keep the checkout state on the order row and change it
+  with an atomic update.
+
+Rate-limit the route like `/api/charge`.
 
 The client result is a **UX signal only** - it tells the browser the embed
 accepted the card, not that money has settled. Confirm settlement
@@ -187,8 +207,9 @@ SDK serializes to the documented `payment_method: { id }` wire field (see
 [Payment Intents](https://docs.vonpay.com/integration/payment-intents)).
 
 `/api/create-session` sends an idempotency key derived from the order id, so a
-retry that reuses the same order id returns the same session. This sample creates its order id per request, so in your code create the order first and reuse its id - otherwise a double-click or refresh still makes a second session
-one. Replace the stand-in order id with your own order record's id.
+retry that reuses the same order id returns the same session. This sample makes
+a stand-in order id for each new checkout. Replace it with your own order
+record's id.
 
 ## Related
 

@@ -16,10 +16,15 @@
  *                        requires_action → redirect the buyer to the 3DS URL
  *                        authorized      → no challenge; capture immediately
  *                        failed          → surface the decline
- *   GET  /3ds/return   Where the issuer sends the buyer back. UX only — the
- *                      real outcome arrives on the webhook.
+ *                      A second /charge on an order that holds or took money
+ *                      answers 409.
+ *   GET  /3ds/return   Where the issuer sends the buyer back. Reads the payment
+ *                      from the API and captures it if the money is held. It
+ *                      never fulfills: that waits for the webhook.
  *   POST /webhooks     Verify the signature, then act on payment_intent.* to
- *                      confirm the post-challenge terminal state.
+ *                      confirm the post-challenge terminal state and update
+ *                      the order. payment_intent.authorized also captures a
+ *                      payment that passed the bank's check.
  *
  * Written against @vonpay/checkout-node 4.x — 4.5.0 or later. 2.5.0 is the
  * first release that types `returnUrl` on `paymentIntents.create`, and 2.7.0
@@ -66,10 +71,23 @@ const baseUrl =
   "https://checkout.vonpay.com";
 
 // Where the issuer's challenge page sends the buyer back. Must be a real,
-// reachable URL on YOUR site. Forwarded to the API as `return_url`.
-const returnUrl =
+// reachable URL on YOUR site. Forwarded to the API as `return_url`. Parsed here
+// so a bad value stops the server at start, not at a buyer's charge.
+const returnUrl = new URL(
   process.env.VON_PAY_RETURN_URL?.replace(/\/+$/, "") ??
-  `http://localhost:${port}/3ds/return`;
+    `http://localhost:${port}/3ds/return`,
+);
+
+// ⛔ Each order's return link carries that order's own id. The payment provider
+// adds only its own `transaction_id` and `transaction_status` to this link, so
+// without this the return page cannot tell which order came back. The name is
+// unusual so it cannot replace a parameter your own return link already has.
+const ORDER_PARAM = "vonpay_sample_order";
+function returnUrlFor(orderId: string): string {
+  const url = new URL(returnUrl);
+  url.searchParams.set(ORDER_PARAM, orderId);
+  return url.toString();
+}
 
 const vonpay = new VonPayCheckout({ apiKey, baseUrl });
 
@@ -146,13 +164,99 @@ interface Order {
   id: string;
   amount: number;
   currency: string;
+  /** "open" until a charge comes back, then the payment's own status. */
+  status: "open" | PaymentIntent["status"];
+  /** The payment made for this order, once the API has answered. */
+  intentId?: string;
+  /**
+   * A capture was sent and its answer was lost or ambiguous. Money may have
+   * moved: this order is not captured again until a person has checked it.
+   */
+  captureUnknown?: boolean;
+  /** The capture call now running, so a second path joins it. See captureOrder. */
+  capturing?: Promise<CaptureResult>;
 }
+type CaptureResult = PaymentIntent | "refused" | "retry_later" | "unknown";
 const orders = new Map<string, Order>();
 
 function createOrder(): Order {
-  const order: Order = { id: `ord_${randomUUID()}`, amount: AMOUNT_MINOR, currency: CURRENCY };
+  const order: Order = { id: `ord_${randomUUID()}`, amount: AMOUNT_MINOR, currency: CURRENCY, status: "open" };
   orders.set(order.id, order);
   return order;
+}
+
+// Money is held or taken. A repeat /charge must not read like a new payment.
+function orderHoldsMoney(order: Order): boolean {
+  return order.status === "authorized" || order.status === "captured" || order.status === "succeeded";
+}
+
+// Only an order still holding money captures, and never after an unknown capture.
+// A function, not an inline test: the answer can change during an await, because a
+// webhook and a buyer's return run at the same time.
+function mayCapture(order: Order): boolean {
+  return order.status === "authorized" && order.captureUnknown !== true;
+}
+
+// Webhooks can arrive late and out of order, and a read can race a webhook, so a
+// late failure or hold never moves an order back from a state that holds or took
+// money. A released hold is the one exception: the money is free again, and an
+// order left at `authorized` would refuse every new /charge.
+function moveOrder(order: Order, status: PaymentIntent["status"]): void {
+  const holdReleased = order.status === "authorized" && (status === "voided" || status === "cancelled");
+  if (status === "succeeded" || status === "captured" || holdReleased || !orderHoldsMoney(order)) {
+    order.status = status;
+  }
+}
+
+// Apply a webhook to the order that made this payment.
+function updateOrderFromWebhook(
+  intentId: string | null,
+  status: "authorized" | "succeeded" | "failed",
+): Order | undefined {
+  if (intentId === null) return undefined;
+  for (const order of orders.values()) {
+    if (order.intentId !== intentId) continue;
+    moveOrder(order, status);
+    return order;
+  }
+  return undefined;
+}
+
+// The one capture call. Every path uses it, so the key is always {order}:capture
+// and a repeat from any path collapses into one capture.
+//
+// The webhook and the buyer's return can arrive together. The second one joins the
+// call already running: two calls at once can get a "still running" answer, which
+// would read as an unknown capture. This map is per process, so a real app with
+// more than one process takes this claim with an atomic update on the order row.
+function captureOrder(order: Order, intentId: string): Promise<CaptureResult> {
+  order.capturing ??= sendCapture(order, intentId).finally(() => {
+    order.capturing = undefined;
+  });
+  return order.capturing;
+}
+
+// ⛔ Three different failures. The order is kept in all of them, at `authorized`:
+//   refused      The API answered no. No money moved, and repeating cannot help.
+//   retry_later  The API answered no for now. No money moved. Repeat the same key.
+//   unknown      A 5xx, a lost answer, or "reconcile". The capture may have gone
+//                through, and an idempotency key does not make a repeat safe here.
+//                Do NOT capture again: read the payment or ask a person first.
+async function sendCapture(order: Order, intentId: string): Promise<CaptureResult> {
+  try {
+    const captured = await vonpay.paymentIntents.capture(intentId, undefined, {
+      idempotencyKey: `${order.id}:capture`,
+    });
+    order.status = captured.status;
+    return captured;
+  } catch (err) {
+    logVonPayError("capture", err);
+    if (err instanceof VonPayError && err.status < 500 && err.nextAction !== "reconcile") {
+      return err.retryable ? "retry_later" : "refused";
+    }
+    order.captureUnknown = true;
+    return "unknown";
+  }
 }
 
 // POST /orders — start an order. Returns its id; pass it to /charge.
@@ -175,6 +279,11 @@ app.post("/orders", (_req: Request, res: Response): void => {
 // We use capture_method: "manual" so a 3DS success lands on `authorized`
 // (auth held, not captured) and we capture explicitly. With
 // capture_method: "automatic" the same flow collapses straight to `succeeded`.
+//
+// ⚠ Before deploying, rate-limit /orders and /charge (per buyer and per IP) and
+// put your bot / card-testing protection in front of them. /charge moves money
+// with your secret key on every call, which is exactly what card testers look
+// for. This sample deliberately has neither.
 app.post("/charge", async (req: Request, res: Response): Promise<void> => {
   // There is no made-up test token: in test mode a `vp_pmt_test_*` token is a
   // real card saved on your sandbox account's payment provider test
@@ -200,6 +309,20 @@ app.post("/charge", async (req: Request, res: Response): Promise<void> => {
   }
   const orderId = order.id;
 
+  // ⛔ An order that holds or took money answers a conflict, so a repeat cannot
+  // read like a new payment. The idempotency key alone would replay the old
+  // answer in silence. A payment still at the bank's check (requires_action) or
+  // declined is not refused here: its replay is the same redirect or decline.
+  if (orderHoldsMoney(order)) {
+    res.status(409).json({
+      error: "This order already has a payment. Do not pay again.",
+      code: "order_already_charged",
+      orderStatus: order.status,
+      intentId: order.intentId,
+    });
+    return;
+  }
+
   const chargeParams: CreatePaymentIntentParams = {
     amount: order.amount,
     currency: order.currency,
@@ -210,7 +333,7 @@ app.post("/charge", async (req: Request, res: Response): Promise<void> => {
     // what stops a stored card being billed to the wrong customer. It only
     // protects you when you send it (see the saved-cards-mit sample).
     ...(savedCardBuyerId ? { buyerId: savedCardBuyerId } : {}),
-    returnUrl,
+    returnUrl: returnUrlFor(orderId),
     metadata: { order_id: orderId, sample: "payment-intents-3ds" },
   };
 
@@ -227,6 +350,9 @@ app.post("/charge", async (req: Request, res: Response): Promise<void> => {
     res.status(502).json({ error: "Could not create payment intent" });
     return;
   }
+
+  order.status = intent.status;
+  order.intentId = intent.id;
 
   switch (intent.status) {
     case "requires_action": {
@@ -258,21 +384,21 @@ app.post("/charge", async (req: Request, res: Response): Promise<void> => {
 
     case "authorized": {
       // No challenge required. Funds are held — capture to settle.
-      try {
-        const captured = await vonpay.paymentIntents.capture(intent.id, undefined, {
-          idempotencyKey: `${orderId}:capture`,
-        });
-        res.json({
-          outcome: "captured",
-          intentId: captured.id,
-          status: captured.status,
-          amount: captured.amount,
-          currency: captured.currency,
-        });
-      } catch (err) {
-        logVonPayError("charge.capture", err);
+      const captured = await captureOrder(order, intent.id);
+      if (typeof captured === "string") {
+        // The order stays `authorized`: the money is held, so another /charge
+        // answers 409. Finish the capture, or void the hold, from your own
+        // back office.
         res.status(502).json({ error: "Authorized but capture failed" });
+        return;
       }
+      res.json({
+        outcome: "captured",
+        intentId: captured.id,
+        status: captured.status,
+        amount: captured.amount,
+        currency: captured.currency,
+      });
       return;
     }
 
@@ -313,24 +439,55 @@ app.post("/charge", async (req: Request, res: Response): Promise<void> => {
 });
 
 // ─── 3DS return landing ───────────────────────────────────────────────────
-// The issuer sends the buyer back here after the challenge. This is a UX
-// signal ONLY — the authoritative outcome arrives on the webhook below. Do not
-// fulfill from this handler. In a real app you would look the order up by the
-// returned reference and show "we're confirming your payment" until the webhook
-// flips it terminal.
-app.get("/3ds/return", (req: Request, res: Response): void => {
-  const params = req.query as Record<string, string | undefined>;
+// The issuer sends the buyer back here after the challenge. The link says only
+// WHICH order came back, and anyone can open or reload it, so nothing else in the
+// request is read and the payment's status comes from the API, on your key.
+//
+// A payment the API reports as held is captured here too, because the
+// payment_intent.authorized webhook may not reach you (see the README). Both paths
+// use the order's {order}:capture key, so together they make one capture, and
+// reloading this page makes none.
+//
+// ⛔ Do not fulfill from this handler. Fulfill on payment_intent.succeeded.
+// ⚠ A buyer who never comes back does not reach this code. Without the webhook,
+// that payment stays held until you find it some other way.
+app.get("/3ds/return", async (req: Request, res: Response): Promise<void> => {
+  const requested = req.query[ORDER_PARAM];
+  const order = typeof requested === "string" ? orders.get(requested) : undefined;
+  if (order?.intentId) await captureOnReturn(order, order.intentId);
   res.type("html").send(
     [
       "<h1>Authentication complete</h1>",
       "<p>Your bank has finished the security check. We're confirming the",
       "payment now — your order updates as soon as we receive the result.</p>",
-      `<p>Reference: ${escapeHtml(params.payment_intent ?? params.id ?? "(none)")}</p>`,
-      "<p><em>This page is a UX hint. The real outcome is verified server-side",
+      `<p>Reference: ${escapeHtml(order?.id ?? "(none)")}</p>`,
+      "<p><em>This page never fulfills. The real outcome is verified server-side",
       "from the payment_intent.succeeded / payment_intent.failed webhook.</em></p>",
     ].join("\n"),
   );
 });
+
+// The buyer sees the same page whatever happens here. A failed read or capture is
+// left for the webhook, or for a person, as the capture table in the README says.
+async function captureOnReturn(order: Order, intentId: string): Promise<void> {
+  if (order.status === "succeeded" || order.status === "captured" || order.captureUnknown === true) {
+    return;
+  }
+
+  let status: PaymentIntent["status"];
+  try {
+    ({ status } = await vonpay.paymentIntents.retrieve(intentId));
+  } catch (err) {
+    logVonPayError("return.retrieve", err);
+    return;
+  }
+  moveOrder(order, status);
+
+  // Capture only what the API says is held NOW. A webhook may have captured or
+  // marked the order during the read, and staff may have voided the hold.
+  if (status !== "authorized" || !mayCapture(order)) return;
+  await captureOrder(order, intentId);
+}
 
 // ─── Webhook receiver — confirms the post-3DS terminal state ──────────────
 // Header:  x-vonpay-signature: t=<unix>,v1=<hex>  (timestamp is INSIDE the
@@ -342,7 +499,7 @@ app.get("/3ds/return", (req: Request, res: Response): void => {
 // typed `WebhookEvent` union, which includes the `payment_intent.*` family:
 // discriminator `type`, body nested under `data`, decline reason at
 // `data.failure_reason`. Switching on `event.type` narrows `event.data`.
-app.post("/webhooks", (req: Request, res: Response): void => {
+app.post("/webhooks", async (req: Request, res: Response): Promise<void> => {
   const signature = req.headers["x-vonpay-signature"];
   if (typeof signature !== "string") {
     res.status(400).json({ error: "Missing x-vonpay-signature header" });
@@ -376,7 +533,8 @@ app.post("/webhooks", (req: Request, res: Response): void => {
     case "payment_intent.succeeded":
       // 3DS passed (or no challenge was needed) and funds settled. THIS is the
       // signal to fulfill — not the /3ds/return page. Look the order up by
-      // event.data.transaction_id (and dedupe on event.id) and mark it paid.
+      // event.data.payment_intent_id (and dedupe on event.id) and mark it paid.
+      updateOrderFromWebhook(event.data.payment_intent_id, "succeeded");
       console.log({
         route: "/webhooks",
         type: event.type,
@@ -385,8 +543,36 @@ app.post("/webhooks", (req: Request, res: Response): void => {
         msg: "fulfill_order",
       });
       break;
+    case "payment_intent.authorized": {
+      // 3DS passed on a manual-capture payment. The money is held, not taken,
+      // and an unused hold lapses at the bank, so capture it here. The return
+      // page captures too, but the buyer's browser may never come back.
+      const order = updateOrderFromWebhook(event.data.payment_intent_id, "authorized");
+      console.log({
+        route: "/webhooks",
+        type: event.type,
+        eventId: event.id,
+        orderFound: order !== undefined,
+        msg: "funds_held",
+      });
+      // A redelivery or a late event finds the order already captured, or with
+      // a capture nobody may repeat.
+      if (!order || !mayCapture(order)) break;
+
+      const captured = await captureOrder(order, event.data.payment_intent_id as string);
+      if (captured === "retry_later") {
+        // 5xx so the delivery comes back. The repeat sends the same key.
+        res.status(503).json({ error: "Capture not finished. Send this delivery again." });
+        return;
+      }
+      // "refused" and "unknown" are acknowledged: a repeat cannot help the first
+      // and is not safe for the second. The order stays `authorized` for a person
+      // to check. A real app alerts its staff here.
+      break;
+    }
     case "payment_intent.failed":
       // 3DS challenge rejected, or the charge declined. Do NOT fulfill.
+      updateOrderFromWebhook(event.data.payment_intent_id, "failed");
       console.log({
         route: "/webhooks",
         type: event.type,
@@ -427,7 +613,8 @@ app.get("/health", async (_req, res) => {
 
 app.get("/", (_req, res) => {
   // One order per page view. Submitting this form twice sends the same order
-  // id, so it can only ever be charged once.
+  // id, so it can only ever be charged once: the second submit gets the same
+  // decline or bank redirect, or a 409 once the order holds money.
   const order = createOrder();
   res.type("html").send(
     [
@@ -441,7 +628,7 @@ app.get("/", (_req, res) => {
       "</form>",
       "<p>POST /orders — start an order</p>",
       "<p>POST /charge — create intent for an order, redirect to 3DS on requires_action</p>",
-      "<p>GET  /3ds/return — issuer challenge return (UX only)</p>",
+      "<p>GET  /3ds/return — issuer challenge return (captures a held payment, never fulfills)</p>",
       "<p>POST /webhooks — verifies x-vonpay-signature, confirms terminal state</p>",
     ].join("\n"),
   );
@@ -452,7 +639,7 @@ app.listen(port, () => {
     msg: "server_started",
     url: `http://localhost:${port}`,
     baseUrl,
-    returnUrl,
+    returnUrl: returnUrl.toString(),
   });
 });
 
