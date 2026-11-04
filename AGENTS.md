@@ -7,17 +7,17 @@ pick a starting sample.
 
 Read this alongside [`llms.txt`](./llms.txt). Keep everything factual - no
 invented endpoints, events, or fields. Every claim below was checked against the
-samples' code and the published SDK type definitions on **2026-11-03**; when in
+samples' code and the published SDK type definitions on **2026-11-04**; when in
 doubt, the sample's own `package.json` / `requirements.txt` and the installed
 SDK's `.d.ts` files win over this page.
 
-## SDK release lines (checked 2026-11-03)
+## SDK release lines (checked 2026-11-04)
 
 | Package | Samples pin | Current release | Where |
 |---|---|---|---|
-| `@vonpay/checkout-node` | `^4.5.0` (lockfiles at `4.5.0`) | `4.5.0` | npm - Node / TypeScript server SDK |
-| `vonpay-checkout` | `>=4.5,<5` | `4.5.0` | PyPI - Python server SDK |
-| `@vonpay/checkout-mcp` | `^6.4.2` (lockfile at `6.4.2`) | `6.4.2` | npm - MCP server (`agent-mcp` sample; 26 tools, including payment reports and subscription changes; `VONPAY_MCP_TOOLS=read` registers only the tools that read; on a live key every money action and subscription change waits for a person's approval in the MCP host's prompt) |
+| `@vonpay/checkout-node` | `^4.7.0` (lockfiles at `4.7.0`) | `4.7.0` | npm - Node / TypeScript server SDK |
+| `vonpay-checkout` | `>=4.7,<5` | `4.7.0` | PyPI - Python server SDK |
+| `@vonpay/checkout-mcp` | `^6.5.0` (lockfile at `6.5.0`) | `6.5.0` | npm - MCP server (`agent-mcp` sample; 28 tools, including payment reports and subscription changes; `VONPAY_MCP_TOOLS=read` registers only the tools that read; on a live key every money action and subscription change waits for a person's approval in the MCP host's prompt) |
 | `@vonpay/checkout-cli` | not pinned by any sample | `0.18.0` | npm - CLI |
 | `@vonpay/test-cards` | not pinned by any sample | `0.2.1` | npm - the sandbox test cards as data |
 | `vora.js` | CDN only, `https://js.vonpay.com/v1/vora.js` | `/v1/` channel auto-ships patches | browser SDK for embedded card fields - **no npm package** |
@@ -110,7 +110,7 @@ Rules of thumb:
      nothing was blocked. Review that window's payments and hold fulfilment of
      approved ones you do not recognise.
    - the five `subscription.*` events (typed from SDK 4.4.0; every Node
-     sample pins `^4.5.0`).
+     sample pins `^4.7.0`).
 
    `webhooks-node` handles `charge.succeeded` / `charge.failed` /
    `charge.refunded` / `refund.failed` (hosted checkout + refunds) and the five
@@ -185,6 +185,11 @@ Rules of thumb:
    there is no recorded order for this browser, do not call `confirmReturn`
    without them - refuse the page. `expectedAmount` is in minor units.
 
+   From SDK 4.7.0 a return can read `paid: false` with `reason: "refunded"`: the
+   money was taken and went back, so do not fulfil and do not offer to pay again. A
+   return with `needsReview: true` is still a payment: hold the fulfilment and have
+   a person check it (`second_payment`, `refund_state_unknown`).
+
    Use `sessions.confirmReturn(params, undefined, { expectedSuccessUrl,
    expectedKeyMode, maxAgeSeconds, expectedSessionId, expectedAmount,
    expectedCurrency })` (Python: `confirm_return(..., expected_session_id=,
@@ -228,7 +233,7 @@ Rules of thumb:
    shows different test cards for their sandbox, those win. The same list is
    published as data in `@vonpay/test-cards`, and the MCP server's
    `vonpay_checkout_list_test_cards` tool returns it (in
-   `@vonpay/checkout-mcp` 6.4.2, which the sample pins).
+   `@vonpay/checkout-mcp` 6.5.0, which the sample pins).
 
 ## What the 4.x types cover
 

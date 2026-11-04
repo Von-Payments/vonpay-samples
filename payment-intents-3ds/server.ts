@@ -26,7 +26,7 @@
  *                      the order. payment_intent.authorized also captures a
  *                      payment that passed the bank's check.
  *
- * Written against @vonpay/checkout-node 4.x — 4.5.0 or later. 2.5.0 is the
+ * Written against @vonpay/checkout-node 4.x — 4.7.0 or later. 2.5.0 is the
  * first release that types `returnUrl` on `paymentIntents.create`, and 2.7.0
  * the first that types `test_event` on webhook events. Every field
  * this sample sends and reads is on the SDK's typed surface: no casts, no local

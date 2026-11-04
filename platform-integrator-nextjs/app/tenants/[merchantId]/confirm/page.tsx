@@ -125,6 +125,33 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
     );
   }
 
+  // ⚠️ RETURNED is not DECLINED. The buyer paid and the money went back, so this
+  // is neither a failure nor a reason to offer "pay again". Do not fulfil.
+  if (outcome.reason === "refunded") {
+    return (
+      <div className="card">
+        <h1 style={{ marginTop: 0 }}>This payment was returned</h1>
+        <p className="muted">
+          The payment for this order went back to the buyer. There is nothing to
+          pay. {tenant.name} can check the refund in its records.
+        </p>
+        <Link href={`/tenants/${merchantId}`} className="btn">
+          ← Back to {tenant.name}
+        </Link>
+      </div>
+    );
+  }
+
+  // ⚠️ `needsReview` is still a payment, but hold the fulfilment and look first.
+  // `second_payment`: two payments on this session, so check both before you ship
+  // or refund. `refund_state_unknown`: the refund totals were not sent, which is
+  // normal for a few moments after a payment and while a hold is open.
+  if (outcome.needsReview) {
+    console.warn(
+      `Return for tenant ${merchantId}, order ${order.orderId} needs review: ${outcome.reviewReason}`,
+    );
+  }
+
   // `outcome.status` is the server's reading, not the query string's snapshot.
   const status = outcome.status ?? "unknown";
   const sessionId = outcome.sessionId ?? params2.session ?? "";
@@ -149,7 +176,11 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
 
       <div className="card">
         <h1 style={{ marginTop: 0, fontSize: 22, fontWeight: 700 }}>
-          {status === "succeeded" ? "Payment captured" : `Status: ${status}`}
+          {outcome.needsReview
+            ? "Payment received, being checked"
+            : status === "succeeded"
+              ? "Payment captured"
+              : `Status: ${status}`}
         </h1>
         <p className="muted">
           Tenant: <strong style={{ color: "#0a0a0a" }}>{tenant.name}</strong>

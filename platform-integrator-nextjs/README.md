@@ -3,7 +3,7 @@
 Multi-tenant reference integration for platforms (CRMs, subscription engines, ISVs) that resell Von Payments to their own merchants. Demonstrates the per-tenant credential pattern: each merchant onboarded to the platform has their own Von Payments API key and webhook signing secret stored on the platform side; the platform looks up the right credentials at charge time and at webhook time.
 
 - **Stack:** Next.js 16 / React 19 / TypeScript strict (Node.js 20.9 or later)
-- **Von Payments SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 4.x (`^4.5.0`)
+- **Von Payments SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 4.x (`^4.7.0`)
 - **Best for:** subscription-billing CRMs, headless commerce platforms, ISV cart products, marketplace operators - anywhere your product has many "merchants" and each wants to plug Von Payments in as their gateway
 
 ## What it demonstrates
@@ -62,6 +62,7 @@ Open `http://localhost:3000`:
 5. Complete with a sandbox test card: `5200 0000 0000 1203`, expiry `03/30`, CVC `100` (3-D Secure with no challenge: approves). Your sandbox runs 3-D Secure on every card payment, so only the payment provider's 3-D Secure test cards work; common numbers such as `4242 4242 4242 4242` are declined. For a challenge use `4111 1111 1118 1072`; to test a decline, give the customer a price of 2,000.12. [Test mode](https://docs.vonpay.com/reference/test-cards)
 6. Return to `/tenants/tenant_a/confirm` - the page re-reads the session from the API using **Acme's** own secret key, not the other tenants'. ⚠️ It does NOT verify the return signature: that signature uses a platform-wide secret no tenant holds, so a per-tenant check could only ever fail. The per-tenant isolation here comes from the API key, which is the stronger guarantee. Before it shows anything as paid, the page also matches the return to an order YOUR platform created: `/api/charge` records which tenant, order and price each session is for (`lib/orders.ts`, in memory here; use your order table), and the confirm page requires that record, for this tenant, at the same amount and currency. Otherwise a success link copied from another paid order of the same tenant would show "Payment captured" for this one; instead it gets a neutral "we couldn't match this payment" page - not "payment failed", and no "pay again"
 
+   - **A paid return can still need a second look.** From SDK 4.7.0, `confirmReturn()` answers `paid: false` with `reason: "refunded"` when nothing is left of the payment, and the page says so. A second payment, or refund totals that were not sent, stay `paid: true` with `needsReview: true`: hold the fulfilment and look first.
    - **The SDK can do this check for you.** This sample passes the order record's amount and currency to `confirmReturn()` as `expectedAmount` + `expectedCurrency` (SDK 4.0.0+); a session for a different amount or currency comes back as not paid (`reason: "amount_mismatch"`) and gets the "couldn't match" page. The order record (looked up by the returned session, for this tenant) stays the binding; there is no cookie to pass as `expectedSessionId`.
 
 ### 3. Test webhooks (optional)
@@ -125,7 +126,7 @@ The signature is verified using the **tenant's** per-endpoint `whsec_*` secret (
 
 `constructEvent` takes **three** arguments - `(rawBody, signatureHeader, whsec)`. The signed timestamp lives inside the `x-vonpay-signature` header (`t=<unix>,v1=<hex>`); there is no separate timestamp header.
 
-**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^4.5.0` covers it).
+**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^4.7.0` covers it).
 
 ### A webhook may only touch that tenant's orders
 
@@ -147,7 +148,7 @@ if (alreadyCompleted(eventKey)) {
 
 Webhook deliveries are retried on failure. The receiver must dedupe. The sample keys on the verified tenant plus the event `id` and tracks it in an in-memory Map; production should use a persistent store so dedup works across instances. The tenant is part of the key because a signature proves who signed an event, not that its id is genuine: a tenant could sign an event carrying another tenant's real `vp_evt_*` id, and with the id alone as the key, the other tenant's genuine delivery would then be dropped as a duplicate. Do not compose a key from the rest of the payload: one money movement can emit more than one event, and a payload-derived key can collapse two distinct events into one.
 
-A tenant whose `whsec_*` is missing, still the `.env.example` value, or refused by the SDK (SDK releases after 4.5.0 throw a `TypeError` for an empty, example or API-key secret) gets `500` for every delivery, not `400`: the delivery is fine and this server is not configured yet, so the sender retries and the event is not lost.
+A tenant whose `whsec_*` is missing, still the `.env.example` value, or refused by the SDK (SDK 4.7.0 and later throw a `TypeError` for an empty, example or API-key secret) gets `500` for every delivery, not `400`: the delivery is fine and this server is not configured yet, so the sender retries and the event is not lost.
 
 ## Going to production
 
