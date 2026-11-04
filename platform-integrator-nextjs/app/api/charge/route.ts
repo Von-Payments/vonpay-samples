@@ -26,10 +26,11 @@ const ORDER_ID_PATTERN =
  * (`getCustomer`). The browser cannot influence the amount at all; it only
  * picks which customer.
  *
- * ⚠️ Auth: intentionally unauthenticated for local-dev convenience. Gate this
- * route behind your platform's own sign-in before deploying — as written,
- * anyone who can reach it can start a checkout on any tenant's API key. Also
- * check that the signed-in user is allowed to act for `tenantId`.
+ * ⚠️ Auth: proxy.ts guards this route with ADMIN_TOKEN, and in production
+ * refuses every request until ADMIN_TOKEN is set: without it, anyone who can
+ * reach this route can start a checkout on any tenant's API key. Replace it
+ * with your platform's own sign-in, and also check that the signed-in user is
+ * allowed to act for `tenantId`.
  *
  * The handler:
  *   1. Resolves the tenant and the customer, and looks up the tenant's vp_sk

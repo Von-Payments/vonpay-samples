@@ -3,7 +3,7 @@
 Reference integration for the **pay-by-link** pattern: a merchant operator creates a hosted-checkout session from a dashboard form, shares the resulting `checkoutUrl` as a link or QR code, and watches the status update when the webhook arrives. Same `sessions.create()` surface as the cart → redirect flow, different UX: no cart, no per-buyer client code - the merchant is the one creating the session.
 
 - **Stack:** Next.js 16 App Router, React 19, TypeScript strict (Node.js 20.9 or later)
-- **Von Payments SDK:** `@vonpay/checkout-node` 4.x (`^4.0.0`)
+- **Von Payments SDK:** `@vonpay/checkout-node` 4.x (`^4.5.0`)
 - **What it demonstrates:** session creation for asynchronous payment, QR-code rendering, webhook-driven status updates, client-side polling of link status, server-side return confirmation, security headers (CSP / HSTS / X-Frame-Options)
 
 ## 5-minute setup
@@ -25,7 +25,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) - the root redirects to `/links`. Fill in the form, click **Create pay link**, share the URL or QR. When the buyer completes payment, `/api/webhooks` receives `charge.succeeded` and flips the link's status to `paid`. The detail page polls every 5 seconds while the status is `pending`, so the badge updates without a manual refresh.
+Open [http://localhost:3000](http://localhost:3000) - the root redirects to `/links`. Fill in the form, click **Create pay link**, share the URL or QR. When the buyer completes payment, `/api/webhooks` receives `charge.succeeded` and flips the link's status to `paid`. The detail page polls every 5 seconds, so the badge updates without a manual refresh, including after a refund or a second payment.
 
 > **Dev-mode caveat:** the in-memory store in `lib/storage.ts` resets on every Next.js dev-server hot-reload (any file save). Create a link, then avoid editing files until you're done testing, or swap in a persistent store.
 
@@ -39,6 +39,8 @@ ngrok http 3000
 # Register https://<id>.ngrok.io/api/webhooks in /dashboard/developers/webhooks
 ```
 
+Subscribe the endpoint to `charge.succeeded`, `charge.failed` and `charge.refunded`. Without `charge.refunded`, a refunded link keeps saying `paid`.
+
 Without a webhook registered, the status stays `pending` - the return page at `/confirm` still confirms the payment with an authenticated session read, but the dashboard won't know the session completed.
 
 ## How it works
@@ -46,13 +48,15 @@ Without a webhook registered, the status stays `pending` - the return page at `/
 ```
 app/page.tsx                       - redirects to /links
 app/links/page.tsx                 - dashboard (client): form + table of created links
+app/links/link-status.tsx          - status badge + refund and review notes (dashboard and detail)
 app/links/[id]/page.tsx            - detail (server): URL, QR SVG, status poller, metadata
 app/links/[id]/status-poller.tsx   - client component: polls /api/links/[id] every 5s
 app/confirm/page.tsx               - server-side return confirmation (confirmReturn)
 app/api/links/route.ts             - POST create / GET list
 app/api/links/[id]/route.ts        - GET single link
-app/api/webhooks/route.ts          - HMAC webhook verification + in-memory status update
+app/api/webhooks/route.ts          - HMAC webhook verification, dedupe on event id, status update
 lib/storage.ts                     - in-memory link store (dev-only; swap for DB in prod)
+proxy.ts                           - sign-in for the dashboard and /api/links (ADMIN_TOKEN)
 next.config.ts                     - CSP / HSTS / X-Frame-Options / Referrer-Policy headers
 ```
 
@@ -62,12 +66,31 @@ The `sessions.create()` call is the same one the cart → redirect sample makes 
 
 - **The SDK can do this check for you.** This sample passes the link record's amount and currency to `confirmReturn()` as `expectedAmount` + `expectedCurrency` (SDK 4.0.0+); a session for a different amount or currency comes back as not paid (`reason: "amount_mismatch"`) and gets the "couldn't match" page. Keep the link record either way: it is where the expected values come from.
 
-Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header - there is no separate timestamp header). `vonpay.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent` discriminated union. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) - not your API key. **Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^4.0.0` covers it). This sample listens for `charge.succeeded` and `charge.failed` to update the link's status. ⚠️ **Not `session.succeeded`** - the server emits `session.*` internally, but those keys are absent from the merchant subscription catalog, which accepts an unknown event key, stores nothing and returns success. An endpoint subscribed to one receives nothing, forever, and every paid link would sit at `pending`.
+Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<hex>` (the timestamp is inside the header - there is no separate timestamp header). `vonpay.webhooks.constructEvent(rawBody, signatureHeader, webhookSecret)` verifies the HMAC, checks the timestamp is within the freshness window (≤5 min old, ≤30 sec future), and returns a parsed `WebhookEvent` discriminated union. The secret is your **per-endpoint signing secret** (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) - not your API key. **Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^4.5.0` covers it). This sample listens for `charge.succeeded`, `charge.failed` and `charge.refunded` to update the link's status (see [Link states](#link-states)). **Each event is handled once:** the handler dedupes on the event `id` (`vp_evt_*`), so a redelivery or a manual resend is acknowledged and skipped; the id is recorded only after the event was processed, so a delivery that failed part-way is retried for real. The handler also refuses every delivery (500, so it is retried later) while `VON_PAY_WEBHOOK_SECRET` is empty or still the `.env.example` placeholder. ⚠️ **Not `session.succeeded`** - the server emits `session.*` internally, but those keys are absent from the merchant subscription catalog, which accepts an unknown event key, stores nothing and returns success. An endpoint subscribed to one receives nothing, forever, and every paid link would sit at `pending`.
+
+## Link states
+
+| Status | What it means | What moves a link there |
+|---|---|---|
+| `pending` | Nobody has paid | The link was created |
+| `failed` | An attempt failed, and the buyer can try again | `charge.failed` on a pending link |
+| `paid` | One payment went through | `charge.succeeded`. A partial refund keeps `paid` and records the refunded amount |
+| `refunded` | That one payment was refunded in full | `charge.refunded` for that payment, once the total refunded reaches the payment's amount |
+| `needs_review` | The events do not add up to one payment. A person checks before you fulfil or refund | A second payment, a refund of a payment this link does not hold, or a refund of an unknown amount |
+
+- **A payment is never undone by a failure.** A `charge.failed` that arrives late (a declined first attempt, say) never changes a `paid`, `refunded` or `needs_review` link.
+- **A second success is compared by transaction id.** The same id is the same payment reported again, and nothing changes. A different id is a second payment: the link goes to `needs_review` and keeps both ids. Compare `vp_tx_id`. `transaction_id` is the fallback, because two events for one payment can carry different values in it.
+- **A refund is matched to a payment, not to the link.** A checkout session takes one payment. If a second one is captured anyway (a form left open in another tab, say), the payment system can refund it automatically, and you see a refund you did not issue. Its `reason` does not identify it; its transaction id does. The first payment still stands, so the link goes to `needs_review` and never to `refunded`. Do not charge the buyer again.
+- **Full or partial comes from the totals.** Compare `amount_refunded_total` with `original_charge_amount`. Do not read `amount` or `is_partial`: on a second partial refund, they differ between payment connections. If `amount_refunded_total` is `null`, the sample adds up `refund_amount`. If both are `null`, the link goes to `needs_review`.
+- **`abandoned_payment_reversed` changes nothing here.** That refund or released hold is for an attempt that was already closed, and you never got its `charge.succeeded`.
+
+This sample has no button to close a review. Give your staff one in your own system.
 
 ## Security notes
 
+- **The dashboard and `/api/links` need a password.** `proxy.ts` puts them behind HTTP Basic auth: set `ADMIN_TOKEN` to a long random value (for example `openssl rand -hex 32`); the browser asks once, and any user name works. In production (`NODE_ENV=production`, which `next start` and production hosts set) the dashboard and `/api/links` answer `403` until `ADMIN_TOKEN` is set, so a missing setting never leaves them open. Under `npm run dev` with no `ADMIN_TOKEN` they stay open for local testing. These routes create sessions with your API key and show every link's `checkoutUrl`. The buyer's pages (`/confirm`) and `/api/webhooks` stay open; every other path needs the password, including any page or route you add later (to open a new buyer-facing path, add it to the exception list in `proxy.ts`). A request that changes something (a `POST` to `/api/links`) must also come from this site's own pages, so another web site cannot use a signed-in browser to create links. Replace this with your own sign-in before handing it to real merchants.
 - **Always use raw body for webhook verification.** Next.js route handlers give you `req.text()` - use it directly, don't `JSON.parse()` first.
-- **Pin the SDK.** `"latest"` drifts silently; this sample pins the major (`^4.0.0`) and commits a lockfile.
+- **Pin the SDK.** `"latest"` drifts silently; this sample pins the major (`^4.5.0`) and commits a lockfile.
 - **In-memory storage is dev-only.** `lib/storage.ts` uses a `Map` that resets on server restart. In production, persist to Postgres / SQLite / Redis and scope link rows to the authenticated merchant operator.
 - **Two different secrets.** The webhook signing secret (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) signs webhooks. The API key (`vp_sk_*`) authenticates API calls and is what confirms a return. A per-merchant session signing secret (`ss_*`) is not used: it cannot verify the return redirect. Never swap them.
 - **Security headers ship in `next.config.ts`.** Remove them only if you have a deliberate reason.
@@ -75,7 +98,7 @@ Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<
 
 ## Deploying
 
-1. Set `VON_PAY_SECRET_KEY`, `VON_PAY_WEBHOOK_SECRET`, and `NEXT_PUBLIC_BASE_URL` as environment variables in your host (Vercel, Fly.io, AWS, etc.).
+1. Set `VON_PAY_SECRET_KEY`, `VON_PAY_WEBHOOK_SECRET`, `ADMIN_TOKEN` and `NEXT_PUBLIC_BASE_URL` as environment variables in your host (Vercel, Fly.io, AWS, etc.). Without `ADMIN_TOKEN` the dashboard and `/api/links` answer `403`.
 2. Set `NEXT_PUBLIC_BASE_URL` to the production URL of the deployed app - the `successUrl` binding in v2 signatures requires byte-exact canonical URL matching.
 3. Register the webhook at your production `/api/webhooks` URL in `/dashboard/developers/webhooks`. Verify signatures fire correctly via the "Send test event" button in the dashboard.
 4. **Replace `lib/storage.ts` with a real database** before handing this to real merchants.

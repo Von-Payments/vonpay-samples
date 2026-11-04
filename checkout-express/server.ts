@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import express from "express";
 import { VonPayCheckout, minorUnitDigits } from "@vonpay/checkout-node";
 
@@ -35,7 +36,17 @@ const apiKey = process.env.VON_PAY_SECRET_KEY!;
 // Per-endpoint webhook signing secret (whsec_…), shown once when you create
 // the webhook endpoint. This is NOT your API key — verifying with the API key
 // will fail against real production deliveries.
-const webhookSecret = process.env.VON_PAY_WEBHOOK_SECRET!;
+//
+// Refuse to start when it is missing or still the .env.example placeholder:
+// verifying against an empty or published value would accept a forged
+// delivery.
+const webhookSecret = process.env.VON_PAY_WEBHOOK_SECRET?.trim() ?? "";
+if (!webhookSecret || webhookSecret === "whsec_your_endpoint_signing_secret") {
+  console.error(
+    "VON_PAY_WEBHOOK_SECRET is required (whsec_…). Copy .env.example to .env and set it to your endpoint's signing secret.",
+  );
+  process.exit(1);
+}
 // The SDK targets production by default; a `vp_sk_test_*` key runs in sandbox
 // mode there (no separate host). Override VON_PAY_BASE_URL only if support
 // directs you elsewhere.
@@ -86,7 +97,7 @@ function readCookie(header: string | undefined, name: string): string | undefine
 // ── Create checkout session ──────────────────────────────────────────
 app.post("/checkout", async (_req, res) => {
   // Stand-in for YOUR order id — in a real app, create the order first and use its id.
-  const orderId = `order_${Date.now().toString(36)}`;
+  const orderId = `order_${randomUUID()}`;
   const amount = 2500;
   const currency = "USD";
   try {

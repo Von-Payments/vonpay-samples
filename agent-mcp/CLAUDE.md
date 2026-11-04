@@ -16,7 +16,7 @@ This project uses [Von Payments](https://vonpay.com) for hosted checkout, embedd
 - **Python:** `vonpay-checkout` 4.x (PyPI; check `pip index versions vonpay-checkout` for latest)
 - **Browser fields:** `https://js.vonpay.com/v1/vora.js` (auto-update) or `https://js.vonpay.com/vX.Y.Z/vora.js` (pinned - the newest version is named under `channels.v1.current` in `https://js.vonpay.com/integrity.json`)
 - **React wrapper:** `@vonpay/vora-react` - provider + hook for the browser fields (not yet published to npm)
-- **MCP server (for agents):** `@vonpay/checkout-mcp` 5.x - adds 12 tools to any MCP-compatible client (Claude Code, Cursor, Claude Desktop, Continue.dev, Windsurf, custom runtimes). Same surface as the SDK.
+- **MCP server (for agents):** `@vonpay/checkout-mcp` 6.x - adds 26 tools to any MCP-compatible client (Claude Code, Cursor, Claude Desktop, Continue.dev, Windsurf, custom runtimes). Same surface as the SDK.
 - **CLI:** `@vonpay/checkout-cli` (check `npm view @vonpay/checkout-cli version` for latest) - local dev, webhook tail, signature verify. `--json` everywhere; `doctor --for-llm` for agent self-diagnosis.
 
 ## SDK surface (Node + Python - same shape, snake-cased in Python)
@@ -58,7 +58,11 @@ Available under the `vonpay_checkout_*` prefix:
 - `create_session`, `get_session`, `simulate_payment`
 - `create_payment_intent`, `get_payment_intent`, `capture_payment_intent`, `void_payment_intent`
 - `create_refund`, `create_token`
+- `list_payment_intents`, `summarize_approvals` (read-only reporting)
+- `list_subscriptions`, `get_subscription`, `cancel_subscription`, `unschedule_subscription_cancel`, `pause_subscription`, `resume_subscription`, `skip_subscription_renewal`, `set_subscription_next_bill_date`, `set_subscription_interval`, `set_subscription_price`, `set_subscription_discount`, `remove_subscription_discount` (every change needs an `idempotencyKey` unless `dryRun: true`)
 - `health`, `list_test_cards`, `diagnose_error`
+
+`VONPAY_MCP_TOOLS=read` registers only the tools that read.
 
 `list_test_cards` (checkout-mcp 5.2.0 or later) returns the payment provider's sandbox cards: one that approves, one that passes 3-D Secure with no challenge, one that shows a challenge. Expiry 03/30, CVC 100; an order total of 2000.12 declines; a return URL is required.
 

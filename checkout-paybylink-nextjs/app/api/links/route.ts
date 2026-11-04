@@ -13,9 +13,10 @@ const vonpay = new VonPayCheckout({
   // },
 });
 
-// Auth: intentionally unauthenticated for local-dev convenience. Gate this route
-// behind session / Bearer auth before deploying — POST creates real sessions
-// against your API key; GET enumerates every link you've ever made.
+// Auth: proxy.ts guards this route (ADMIN_TOKEN). In production it refuses
+// every request until ADMIN_TOKEN is set: POST creates real sessions against
+// your API key, and GET lists every link you've ever made. Replace it with
+// your own sign-in before handing this to real merchants.
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as {
     amount?: number;

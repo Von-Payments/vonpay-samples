@@ -16,8 +16,10 @@ if (!apiKey) {
 // webhook endpoint in the dashboard. This is NOT your API key — verifying with
 // the API key will fail against real deliveries. The SDK's constructEvent keys
 // the HMAC off this secret.
-const webhookSecret = process.env.VON_PAY_WEBHOOK_SECRET;
-if (!webhookSecret) {
+// Refused when missing or still the .env.example placeholder: verifying against
+// an empty or published value would accept a forged delivery.
+const webhookSecret = process.env.VON_PAY_WEBHOOK_SECRET?.trim();
+if (!webhookSecret || webhookSecret === "whsec_your_endpoint_signing_secret") {
   console.error(
     "VON_PAY_WEBHOOK_SECRET is required (whsec_…). Copy .env.example to .env and fill it in.",
   );

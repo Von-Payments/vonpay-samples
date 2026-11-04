@@ -66,9 +66,20 @@ export default async function LinkDetailPage({
 
       <section style={{ margin: "1.5rem 0" }}>
         <h2>Status</h2>
-        <LinkStatusPoller id={link.id} initialStatus={link.status} initialTransactionId={link.transactionId} />
+        <LinkStatusPoller
+          id={link.id}
+          amount={link.amount}
+          currency={link.currency}
+          initial={{
+            status: link.status,
+            transactionId: link.transactionId,
+            refundedAmount: link.refundedAmount,
+            otherPayments: link.otherPayments,
+            reviewNote: link.reviewNote,
+          }}
+        />
         <p style={{ fontSize: 13, color: "#666" }}>
-          Updates when the charge.succeeded / charge.failed webhook arrives at
+          Updates when a charge.succeeded, charge.failed or charge.refunded webhook arrives at
           <code> /api/webhooks</code>.
         </p>
       </section>

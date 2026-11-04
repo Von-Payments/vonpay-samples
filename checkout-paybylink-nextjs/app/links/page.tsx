@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { formatMinorAmount, toMinorAmount } from "@/lib/money";
+import type { OtherPayment } from "@/lib/storage";
+import { PaymentNotes, StatusBadge } from "./link-status";
 
 interface PayLink {
   id: string;
@@ -10,6 +12,9 @@ interface PayLink {
   description: string;
   status: string;
   createdAt: string;
+  refundedAmount?: number;
+  otherPayments?: OtherPayment[];
+  reviewNote?: string;
 }
 
 export default function LinksDashboard() {
@@ -127,6 +132,14 @@ export default function LinksDashboard() {
                 <td style={cell}>{formatMinorAmount(link.amount, link.currency)}</td>
                 <td style={cell}>
                   <StatusBadge status={link.status} />
+                  <PaymentNotes
+                    status={link.status}
+                    amount={link.amount}
+                    currency={link.currency}
+                    refundedAmount={link.refundedAmount}
+                    otherPayments={link.otherPayments}
+                    reviewNote={link.reviewNote}
+                  />
                 </td>
                 <td style={cell}>{new Date(link.createdAt).toLocaleString()}</td>
                 <td style={cell}>
@@ -147,12 +160,3 @@ const cell: React.CSSProperties = {
   textAlign: "left",
   fontSize: 14,
 };
-
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    pending: "#666",
-    paid: "#0a7a2f",
-    failed: "#b00020",
-  };
-  return <span style={{ color: colors[status] ?? "#333", fontWeight: 600 }}>{status}</span>;
-}

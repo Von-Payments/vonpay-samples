@@ -16,9 +16,8 @@ The SDK handles auth, the ``Von-Pay-Version`` header, idempotency, and retries.
 from __future__ import annotations
 
 import os
-import secrets
 import sys
-import time
+import uuid
 
 from dotenv import load_dotenv
 from vonpay.checkout import (
@@ -87,10 +86,9 @@ def log_error(label: str, err: BaseException) -> None:
 
 
 def main() -> None:
-    # Mirror Node's runId derivation — base36 timestamp + 6 random chars —
-    # so two simultaneous runs against the same merchant don't collide on the
-    # idempotency keys.
-    run_id = f"{int(time.time() * 1000):x}-{secrets.token_hex(3)}"
+    # A random UUID (as the Node sample uses), so two simultaneous runs against
+    # the same merchant never collide on the idempotency keys.
+    run_id = str(uuid.uuid4())
     create_key = f"pi-create-{run_id}"
     capture_key = f"pi-capture-{run_id}"
     refund_key = f"pi-refund-{run_id}"
