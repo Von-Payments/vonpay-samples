@@ -232,6 +232,16 @@ def success():
             200,
         )
 
+    # ⚠️ RETURNED is not DECLINED. The buyer paid and the money went back, so this
+    # is neither a failure nor a reason to offer "pay again". Do not fulfil.
+    if outcome.reason == "refunded":
+        return (
+            "<h1>This payment was returned</h1>"
+            "<p>The payment for this order went back to the buyer. There is nothing "
+            "to pay. Contact us if this looks wrong.</p>",
+            200,
+        )
+
     if not outcome.paid:
         status = escape(outcome.status or "unknown")
         return f"<h1>Payment not completed</h1><p>Status: {status}</p>", 402
@@ -243,6 +253,22 @@ def success():
     order_id = escape(order["order_id"])
     session = escape(outcome.session_id or "")
     status = escape(outcome.status or "")
+
+    # ⚠️ ``needs_review`` is still a payment, but hold the fulfilment and look
+    # first. ``second_payment``: two payments on this session, so check both before
+    # you ship or refund. ``refund_state_unknown``: the refund totals were not sent,
+    # which is normal for a few moments after a payment and while a hold is open.
+    if outcome.needs_review:
+        app.logger.warning(
+            "Return for order %s needs review: %s", order["order_id"], outcome.review_reason
+        )
+        return (
+            "<h1>Payment received</h1>"
+            "<p>We are checking this order and will email you. "
+            "You do not need to pay again.</p>"
+            f"<p>Order: {order_id}</p><p>Session: {session}</p>"
+        )
+
     return (
         f"<h1>Payment {status}</h1>"
         f"<p>Order: {order_id}</p><p>Session: {session}</p>"

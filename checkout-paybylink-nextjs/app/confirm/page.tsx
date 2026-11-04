@@ -124,6 +124,23 @@ export default async function ConfirmPage({
     );
   }
 
+  // ⚠️ RETURNED is not DECLINED. The buyer paid and the money went back, so this
+  // is neither a failure nor a reason to offer "pay again". Do not fulfil.
+  if (outcome.reason === "refunded") {
+    return (
+      <main>
+        <h1>This payment was returned</h1>
+        <p>
+          The payment for this pay link went back to the buyer. There is nothing to
+          pay. Contact us if this looks wrong.
+        </p>
+        <p>
+          <a href="/links">← Back to dashboard</a>
+        </p>
+      </main>
+    );
+  }
+
   if (!outcome.paid) {
     return (
       <main>
@@ -148,9 +165,19 @@ export default async function ConfirmPage({
   // ⚠️ Displaying a confirmation is safe to repeat. FULFILLING is not — this URL
   // can be replayed, and the status keeps reading "succeeded" every time. Record
   // which session IDs you have already fulfilled and refuse to fulfil one twice.
+  // ⚠️ `needsReview` is still a payment, but hold the fulfilment and look first.
+  // `second_payment`: two payments on this session, so check both before you ship
+  // or refund. `refund_state_unknown`: the refund totals were not sent, which is
+  // normal for a few moments after a payment and while a hold is open.
+  if (outcome.needsReview) {
+    console.warn(`Return for pay link ${link.id} needs review: ${outcome.reviewReason}`);
+  }
   return (
     <main>
-      <h1>Payment successful</h1>
+      <h1>{outcome.needsReview ? "Payment received" : "Payment successful"}</h1>
+      {outcome.needsReview && (
+        <p>We are checking this pay link and will email you. You do not need to pay again.</p>
+      )}
       <p>For: {link.description}</p>
       <p>Session: {outcome.sessionId}</p>
       <p>Status: {outcome.status}</p>

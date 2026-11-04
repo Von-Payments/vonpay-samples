@@ -78,19 +78,19 @@ A card payment can pause while the buyer completes 3-D Secure, so always send a 
 
 Two surfaces let you skip writing client code entirely and integrate from inside an agent or a terminal:
 
-- **MCP server** - [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp). Drop-in Model Context Protocol server. Add it to Claude Desktop, Cursor, Claude Code, or any MCP-aware runtime, and the agent can create and read sessions, drive payment intents (create, capture, void, refund), save a card, list payments and summarize approval rates, read and change subscriptions, list the sandbox test cards, simulate a payment, and diagnose errors directly (26 tools in 6.4.2). Set `VONPAY_MCP_TOOLS=read` for a reporting agent that must not move money; on a live key, every money action and subscription change waits for a person's approval in the MCP host's prompt. See [`docs.vonpay.com/sdks/mcp`](https://docs.vonpay.com/sdks/mcp) for the install snippet.
+- **MCP server** - [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp). Drop-in Model Context Protocol server. Add it to Claude Desktop, Cursor, Claude Code, or any MCP-aware runtime, and the agent can create and read sessions, drive payment intents (create, capture, void, refund), save a card, list payments and summarize approval rates, read and change subscriptions, list the sandbox test cards, simulate a payment, and diagnose errors directly (28 tools in 6.4.2). Set `VONPAY_MCP_TOOLS=read` for a reporting agent that must not move money; on a live key, every money action and subscription change waits for a person's approval in the MCP host's prompt. See [`docs.vonpay.com/sdks/mcp`](https://docs.vonpay.com/sdks/mcp) for the install snippet.
 - **CLI** - [`@vonpay/checkout-cli`](https://www.npmjs.com/package/@vonpay/checkout-cli). One-command session creation, webhook tail, signature verification. Works equally well for ad-hoc testing and as a tool any agent can shell out to. `npx @vonpay/checkout-cli --help`.
 
 The samples themselves are written to be agent-paste-friendly: short files, explicit env vars, no hidden imports, typed errors. Drop a sample folder into Cursor / Claude Code and ask the agent to extend it - it has everything it needs in-context.
 
 ## SDKs
 
-| SDK | Package | Samples pin | Current release (checked 2026-11-03) | Used in |
+| SDK | Package | Samples pin | Current release (checked 2026-11-04) | Used in |
 |---|---|---|---|---|
-| Node.js | [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) | `^4.5.0` (lockfiles `4.5.0`) | `4.5.0` | nextjs, express, paybylink-nextjs, platform-integrator-nextjs, payment-intents-node, payment-intents-3ds, saved-cards-mit, checkout-embedded, webhooks-node |
-| Python | [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) | `>=4.5,<5` | `4.5.0` | flask, payment-intents-python |
+| Node.js | [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) | `^4.7.0` (lockfiles `4.7.0`) | `4.7.0` | nextjs, express, paybylink-nextjs, platform-integrator-nextjs, payment-intents-node, payment-intents-3ds, saved-cards-mit, checkout-embedded, webhooks-node |
+| Python | [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) | `>=4.7,<5` | `4.7.0` | flask, payment-intents-python |
 | CLI | [`@vonpay/checkout-cli`](https://www.npmjs.com/package/@vonpay/checkout-cli) | not pinned | `0.18.0` | install separately for ad-hoc testing or agent-tool use |
-| MCP | [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp) | `^6.4.2` (lockfile `6.4.2`) | `6.4.2` | agent-mcp; install in an MCP-aware runtime (Claude Desktop, Cursor, etc.) |
+| MCP | [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp) | `^6.5.0` (lockfile `6.5.0`) | `6.5.0` | agent-mcp; install in an MCP-aware runtime (Claude Desktop, Cursor, etc.) |
 | Test cards | [`@vonpay/test-cards`](https://www.npmjs.com/package/@vonpay/test-cards) | not pinned | `0.2.1` | the sandbox test cards as data, for your own tests or tooling |
 
 Embedded card fields load the browser SDK (`vora.js`) from the CDN `<script>` at `https://js.vonpay.com/v1/vora.js` - there is no npm package for it; see [`checkout-embedded`](./checkout-embedded).

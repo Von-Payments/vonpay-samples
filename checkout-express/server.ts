@@ -292,6 +292,17 @@ app.get("/success", async (req, res) => {
     return;
   }
 
+  // ⚠️ RETURNED is not DECLINED. The buyer paid and the money went back, so this
+  // is neither a failure nor a reason to offer "pay again". Do not fulfil.
+  if (outcome.reason === "refunded") {
+    res
+      .status(200)
+      .send("<h1>This payment was returned</h1>" +
+            "<p>The payment for this order went back to the buyer. There is nothing " +
+            "to pay. Contact us if this looks wrong.</p>");
+    return;
+  }
+
   if (!outcome.paid) {
     res
       .status(402)
@@ -312,8 +323,19 @@ app.get("/success", async (req, res) => {
   // URL can be replayed, and the status keeps reading "succeeded" every time.
   // Before shipping goods, record which session IDs you have already fulfilled
   // and refuse to fulfil one twice. Fulfil from the webhook, not from here.
+  // ⚠️ `needsReview` is still a payment, but hold the fulfilment and look first.
+  // `second_payment`: two payments on this session, so check both before you ship
+  // or refund. `refund_state_unknown`: the refund totals were not sent, which is
+  // normal for a few moments after a payment and while a hold is open.
+  if (outcome.needsReview) {
+    console.warn(`Return for order ${order.orderId} needs review: ${outcome.reviewReason}`);
+  }
+  const heading = outcome.needsReview ? "Payment received" : "Payment successful";
+  const reviewNote = outcome.needsReview
+    ? "<p>We are checking this order and will email you. You do not need to pay again.</p>"
+    : "";
   res.send(`
-    <h1>Payment successful</h1>
+    <h1>${heading}</h1>${reviewNote}
     <p>Order: ${esc(order.orderId)}</p>
     <p>Session: ${esc(sessionId)}</p>
     <p>Status: ${esc(outcome.status ?? "")}</p>

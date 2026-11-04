@@ -84,13 +84,13 @@ File-name conventions by client:
 
 ### 5. Restart the client. Confirm tools appear.
 
-In Claude Code: type `/mcp`. You should see `vonpay-checkout` with 26 tools. In Cursor: the Tools panel shows the same list. In Claude Desktop: the 🔌 icon appears in the input box.
+In Claude Code: type `/mcp`. You should see `vonpay-checkout` with 28 tools. In Cursor: the Tools panel shows the same list. In Claude Desktop: the 🔌 icon appears in the input box.
 
 If nothing shows up, check the MCP server logs - usually a missing or malformed `VON_PAY_SECRET_KEY`.
 
 ## What the agent can do
 
-26 tools in five groups (checkout-mcp 6.4 or later). To give an agent only the tools that read - nothing that charges, refunds, saves a card, creates a session or changes a subscription - set `VONPAY_MCP_TOOLS=read` in the server's environment, and use a key that holds only read permissions.
+28 tools in five groups (checkout-mcp 6.5 or later). To give an agent only the tools that read - nothing that charges, refunds, saves a card, creates a session or changes a subscription - set `VONPAY_MCP_TOOLS=read` in the server's environment, and use a key that holds only read permissions.
 
 ### Hosted checkout
 
@@ -122,6 +122,7 @@ If nothing shows up, check the MCP server logs - usually a missing or malformed 
 
 | Tool | What it does |
 |---|---|
+| `vonpay_checkout_list_subscription_products` / `vonpay_checkout_get_subscription_product_terms` | List your subscription products, or read one product's renewal terms (read-only) |
 | `vonpay_checkout_list_subscriptions` / `vonpay_checkout_get_subscription` | List subscriptions or read one (status, price, interval, next bill date, discount, pause, scheduled cancel). Read-only |
 | `vonpay_checkout_cancel_subscription` / `vonpay_checkout_unschedule_subscription_cancel` | Cancel now or at the end of the paid period (a cancel never refunds); withdraw a scheduled cancel |
 | `vonpay_checkout_pause_subscription` / `vonpay_checkout_resume_subscription` / `vonpay_checkout_skip_subscription_renewal` | Pause renewals, resume them, or skip the next one |
