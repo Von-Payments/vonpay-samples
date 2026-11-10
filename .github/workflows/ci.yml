@@ -25,6 +25,7 @@ jobs:
           - payment-intents-node
           - payment-intents-3ds
           - saved-cards-mit
+          - funnel-one-click-node
           - checkout-embedded
           - webhooks-node
           - agent-mcp
