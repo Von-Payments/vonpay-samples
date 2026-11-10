@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Funnel checkout sample</title>
+    <!--
+      vora.js from the CDN, pinned to one version with Subresource Integrity.
+      The sha384 is the published hash for this version
+      (https://js.vonpay.com/integrity.json, key versions["v1.49.0"].sha384).
+      Change the version and the hash together when you re-pin. The page's own
+      wording as the shopper's agreement (`vora.elements.create({
+      setupForFutureUse: "off_session" })`) needs vora.js 1.43.0 or later.
+    -->
+    <script
+      src="https://js.vonpay.com/v1.49.0/vora.js"
+      integrity="sha384-JDdS8AeQ+cz638sqhaP4J2HvdUT4qYpwbI13Ym/gNKuRfhohnVBfQzfG5CO4O00r"
+      crossorigin="anonymous"
+    ></script>
+    <link rel="preconnect" href="https://js.vonpay.com" crossorigin />
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 480px; margin: 32px auto; padding: 0 16px; color: #111827; }
+      .field { border: 1px solid #d1d5db; border-radius: 6px; padding: 10px; margin: 8px 0; min-height: 22px; }
+      .row { display: flex; gap: 8px; }
+      .row .field { flex: 1; }
+      #terms { font-size: 14px; line-height: 1.4; margin: 16px 0 8px; }
+      button { width: 100%; padding: 14px; font-size: 17px; border: 0; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; }
+      button:disabled { background: #9ca3af; cursor: default; }
+      button.secondary { background: #fff; color: #374151; border: 1px solid #d1d5db; margin-top: 8px; }
+      .error { color: #b91c1c; min-height: 1.2em; }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <!-- Step 1: the one-page order form -->
+    <section id="order-step">
+      <h1 id="offer-name">Loading…</h1>
+      <p id="offer-price"></p>
+      <div id="card-number" class="field"></div>
+      <div class="row">
+        <div id="card-expiry" class="field"></div>
+        <div id="card-cvc" class="field"></div>
+      </div>
+      <!--
+        The agreement sits RIGHT ABOVE the button, in full, not behind a link.
+        The text comes from the server, which records what it showed.
+      -->
+      <p id="terms"></p>
+      <button id="pay" disabled>Place my order</button>
+      <p id="order-error" class="error" role="alert"></p>
+    </section>
+
+    <!-- Step 2: the one-click add-on, on the SAME saved card -->
+    <section id="add-on-step" hidden>
+      <h2>Your order is paid. One more thing…</h2>
+      <p id="add-on-text"></p>
+      <button id="add-on-yes">Yes, add it to my order</button>
+      <button id="add-on-no" class="secondary">No thanks</button>
+      <p id="add-on-error" class="error" role="alert"></p>
+    </section>
+
+    <!-- Step 3: what the SERVER read -->
+    <section id="done-step" hidden>
+      <h2 id="done-title"></h2>
+      <p id="done-text"></p>
+    </section>
+
+    <script src="/funnel.js"></script>
+  </body>
+</html>
