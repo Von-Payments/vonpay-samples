@@ -3,7 +3,7 @@
 Server-side handling for a payment intent that returns **`requires_action`** - the issuer wants to challenge the buyer (3D Secure / Strong Customer Authentication). Single Express server that creates the intent, redirects the buyer to the bank's challenge page, and confirms the terminal outcome from the webhook.
 
 - **Stack:** Node 20+, TypeScript strict, ESM, Express 5
-- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 4.x (`^4.7.0`): 2.5.0 is the first release that types `returnUrl` on `paymentIntents.create`, and 2.7.0 the first that types `test_event` on webhook events
+- **SDK:** [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) 4.x (`^4.10.0`): 2.5.0 is the first release that types `returnUrl` on `paymentIntents.create`, and 2.7.0 the first that types `test_event` on webhook events
 - **Best for:** server-driven (Payment Intents) integrations in regions where SCA applies (EU/UK/EEA), or any flow where the issuer may step up to 3DS
 
 ## The 3DS server-side model in one paragraph
@@ -120,7 +120,7 @@ A real app alerts its staff in the first and last rows. An unused hold lapses at
 
 `vonpay.webhooks.constructEvent` verifies the signature and returns the typed `WebhookEvent` union, which includes the `payment_intent.*` events - discriminator `type`, body nested under `data`, decline reason at `data.failure_reason` (see the [webhook events reference](https://docs.vonpay.com/integration/webhook-events)). Switching on `event.type` narrows `event.data`, so there is no second parse and no widened type. Dedupe redeliveries on the event `id` (`vp_evt_*`) with a durable store.
 
-**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^4.7.0` covers it).
+**Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^4.10.0` covers it).
 
 ### Testing the webhook locally
 
