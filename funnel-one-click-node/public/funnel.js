@@ -119,11 +119,20 @@ async function startOrder() {
     "card-cvc": collection.create("card-cvc", { style }),
   };
   const complete = { "card-number": false, "card-expiry": false, "card-cvc": false };
+  // Clear only a message the card fields put there: a field's first change event
+  // can arrive after a decline message is shown, and must not wipe it.
+  let fieldMessage = false;
   for (const [type, el] of Object.entries(fields)) {
     el.on("change", (e) => {
       complete[type] = e.complete;
       $("pay").disabled = !Object.values(complete).every(Boolean);
-      $("order-error").textContent = e.error ? e.error.message : "";
+      if (e.error) {
+        $("order-error").textContent = e.error.message;
+        fieldMessage = true;
+      } else if (fieldMessage) {
+        $("order-error").textContent = "";
+        fieldMessage = false;
+      }
     });
     el.mount(`#${type}`);
   }
