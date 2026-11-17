@@ -84,13 +84,13 @@ File-name conventions by client:
 
 ### 5. Restart the client. Confirm tools appear.
 
-In Claude Code: type `/mcp`. You should see `vonpay-checkout` with 28 tools. In Cursor: the Tools panel shows the same list. In Claude Desktop: the 🔌 icon appears in the input box.
+In Claude Code: type `/mcp`. You should see `vonpay-checkout` with 34 tools. In Cursor: the Tools panel shows the same list. In Claude Desktop: the 🔌 icon appears in the input box.
 
 If nothing shows up, check the MCP server logs - usually a missing or malformed `VON_PAY_SECRET_KEY`.
 
 ## What the agent can do
 
-28 tools in five groups (checkout-mcp 6.5 or later). To give an agent only the tools that read - nothing that charges, refunds, saves a card, creates a session or changes a subscription - set `VONPAY_MCP_TOOLS=read` in the server's environment, and use a key that holds only read permissions.
+34 tools in six groups (checkout-mcp 6.9 or later). To give an agent only the tools that read - nothing that charges, refunds, saves a card, creates a session or changes a subscription - set `VONPAY_MCP_TOOLS=read` in the server's environment, and use a key that holds only read permissions.
 
 ### Hosted checkout
 
@@ -131,12 +131,24 @@ If nothing shows up, check the MCP server logs - usually a missing or malformed 
 
 Every subscription change needs an `idempotencyKey`, on sandbox keys too, unless it is a `dryRun: true` preview (which changes nothing).
 
+### Subscription products
+
+| Tool | What it does |
+|---|---|
+| `vonpay_checkout_get_subscription_product` | Read one product by id or reference: its price, schedule, terms, routing profile, the stores it is sold in and how many subscriptions use it (read-only) |
+| `vonpay_checkout_create_subscription_product` | Create a product: name, your store product number, renewal price, currency and how often it renews |
+| `vonpay_checkout_update_subscription_product` | Change its name, routing profile, schedule or store links. A schedule or routing change applies to new sign-ups only |
+| `vonpay_checkout_change_subscription_product_price` | Change its renewal price. A raise applies to new sign-ups only; with `applyToExisting: true` a cut also lowers existing subscribers still on the old price |
+| `vonpay_checkout_archive_subscription_product` / `vonpay_checkout_unarchive_subscription_product` | Stop new sign-ups to a product (existing subscribers keep renewing), or bring it back |
+
+Each product write needs an `idempotencyKey` on every key (there is no dry run), and on a live key a person approves it in your MCP host's prompt.
+
 ### Diagnostics
 
 | Tool | What it does |
 |---|---|
 | `vonpay_checkout_health` | API health + latency |
-| `vonpay_checkout_list_test_cards` | The payment provider's sandbox cards (approve, 3-D Secure with no challenge, 3-D Secure challenge), expiry 03/30, CVC 100, and the order total that declines (2000.12). Needs checkout-mcp 5.2.0 or later; see [Test cards](#test-cards) |
+| `vonpay_checkout_list_test_cards` | The payment provider's sandbox cards (every one goes through 3-D Secure: some pass without a challenge, some show one), expiry 03/30, CVC 100, and the order total that declines (2000.12). Needs checkout-mcp 5.2.0 or later; see [Test cards](#test-cards) |
 | `vonpay_checkout_diagnose_error` | Take an error code, return structured `{ retryable, nextAction, llmHint, fix, docs, agentInstructions }` - pure data, no API call |
 
 ## Example agent prompts
