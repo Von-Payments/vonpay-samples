@@ -36,7 +36,7 @@ Sandbox test card: `5200 0000 0000 1203`, expiry `03/30`, CVC `100`. Your sandbo
 
 The routes are in [`server/app.ts`](server/app.ts); the page is [`public/index.html`](public/index.html) + [`public/funnel.js`](public/funnel.js).
 
-**vora.js version.** The page loads one pinned build, `https://js.vonpay.com/v1.49.0/vora.js`, with its Subresource Integrity hash. To move to a newer build, change the version and the `integrity` value together, taking the hash from `https://js.vonpay.com/integrity.json` (`versions["v1.X.Y"].sha384`). The page's own wording as agreement needs vora.js 1.43.0 or later.
+**vora.js version.** The page loads one pinned build, `https://js.vonpay.com/v1.53.0/vora.js`, with its Subresource Integrity hash. To move to a newer build, change the version and the `integrity` value together, taking the hash from `https://js.vonpay.com/integrity.json` (`versions["v1.X.Y"].sha384`). The page's own wording as agreement needs vora.js 1.43.0 or later.
 
 ## How the shopper agrees to keep the card on file
 

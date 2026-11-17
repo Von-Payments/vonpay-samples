@@ -110,7 +110,7 @@ const event = vonpay.webhooks.constructEvent(
 );
 ```
 
-`constructEvent` parses the header, recomputes `HMAC_SHA256(secret, "${t}.${rawBody}")`, timing-safe-compares against each `v1=` entry (it accepts on any match, which is what makes a secret rotation seamless), enforces the replay window (reject if `now − t > 5 min` or `t − now > 30 sec`), and returns a typed `WebhookEvent`. It throws on any failure - catch it and return `400`.
+`constructEvent` parses the header, recomputes `HMAC_SHA256(secret, "${t}.${rawBody}")`, timing-safe-compares against each `v1=` entry (it accepts on any match, so a secret rotation drops no events), enforces the replay window (reject if `now − t > 5 min` or `t − now > 30 sec`), and returns a typed `WebhookEvent`. It throws on any failure - catch it and return `400`.
 
 **Check `event.test_event` first.** A delivery from **Send test event** is signed like a real one and can carry a real session's ids, so when it is `true` the handler returns 2xx and does nothing else (the field is typed from SDK 2.7.0; this sample's `^4.10.0` covers it). It runs before the dedupe step.
 
