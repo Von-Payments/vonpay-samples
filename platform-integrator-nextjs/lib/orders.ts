@@ -21,6 +21,17 @@ const holder = globalThis as typeof globalThis & {
 };
 const ordersBySession = (holder.__vonpaySamplePlatformOrders ??= new Map<string, OrderRecord>());
 
+/**
+ * ⚠ In memory, so a flood of charges grows this map without limit. At the cap
+ * the charge route refuses new checkouts rather than forget an order someone
+ * may be paying. A real platform keeps orders in its database.
+ */
+export const MAX_OPEN_ORDERS = 10_000;
+
+export function hasRoomForOrder(): boolean {
+  return ordersBySession.size < MAX_OPEN_ORDERS;
+}
+
 export function saveOrder(sessionId: string, order: OrderRecord): void {
   ordersBySession.set(sessionId, order);
 }

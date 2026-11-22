@@ -17,10 +17,10 @@ SDK's `.d.ts` files win over this page.
 |---|---|---|---|
 | `@vonpay/checkout-node` | `^4.13.0` (lockfiles `4.13.0`) | `4.13.0` | npm - Node / TypeScript server SDK |
 | `vonpay-checkout` | `>=4.7,<5` | `4.13.0` | PyPI - Python server SDK (Python 3.9+) |
-| `@vonpay/checkout-mcp` | `^6.10.0` (lockfile `6.10.0`) | `6.10.0` | npm - MCP server (`agent-mcp` sample; the pinned `6.10.0` registers 35 tools, including payment reports, subscription changes, subscription products and a subscription's payment tries; `VONPAY_MCP_TOOLS=read` registers only the tools that read; on a live key every money action and subscription change waits for a person's approval in the MCP host's prompt) |
+| `@vonpay/checkout-mcp` | `^6.10.0` (lockfile `6.10.0`) | `6.10.0` | npm - MCP server (`agent-mcp` sample; the pinned `6.10.0` registers 35 tools, including payment reports, subscription changes, subscription products and a subscription's payment tries; `VONPAY_MCP_TOOLS=read` registers only the 14 tools that read, and the sample's config starts with it set and the version pinned (`@vonpay/checkout-mcp@6.10.0`); on a sandbox key the other tools run with no approval prompt; on a live key every money action and subscription change waits for a person's approval in the MCP host's prompt) |
 | `@vonpay/checkout-cli` | not pinned by any sample | `0.23.0` | npm - CLI |
 | `@vonpay/test-cards` | not pinned by any sample | `0.2.1` | npm - the sandbox test cards as data |
-| `vora.js` | CDN only; `funnel-one-click-node` pins `https://js.vonpay.com/v1.53.0/vora.js` with its integrity hash (`checkout-embedded` still loads the auto-updating `/v1/` channel) | published builds and hashes in `https://js.vonpay.com/integrity.json` | browser SDK for embedded card fields - **no npm package** |
+| `vora.js` | CDN only; `checkout-embedded` and `funnel-one-click-node` pin `https://js.vonpay.com/v1.54.1/vora.js` with its integrity hash (the auto-updating `/v1/` channel is a stated alternative, not the default) | published builds and hashes in `https://js.vonpay.com/integrity.json` | browser SDK for embedded card fields - **no npm package** |
 
 Rules of thumb:
 
@@ -169,12 +169,13 @@ Rules of thumb:
    hosted-checkout fulfilment.
 
 2. **Embedded card fields load `vora.js` from the CDN `<script>`.** Load a
-   fixed version with its integrity hash, as `funnel-one-click-node` does:
+   fixed version with its integrity hash, as `checkout-embedded` and
+   `funnel-one-click-node` do:
 
    ```html
    <script
-     src="https://js.vonpay.com/v1.53.0/vora.js"
-     integrity="sha384-/cgW04ufp8aAyV9bRSGns6zXGri76k64htTLeCz1Wd8huca9dRagLc6BgY/ba5wl"
+     src="https://js.vonpay.com/v1.54.1/vora.js"
+     integrity="sha384-SZhMd+iYRArjDgHq08tAqKu5WZJ9V6cChe5udrnY3YQXyPlsfseQWqP8oKTaAjhP"
      crossorigin="anonymous"
    ></script>
    ```
@@ -189,6 +190,18 @@ Rules of thumb:
    nothing checks what runs. Do **not** add or npm-install any processor or
    card-network SDK for embedded checkout - the card is collected in a Von
    Payments hosted iframe, so card data never touches your server or DOM.
+
+   **Build the page's Content Security Policy from the published list.** Each
+   vora.js version publishes the sources it needs at
+   `https://js.vonpay.com/v<version>/csp.json`, one list for test keys and one
+   for live keys (the file's hash is in `integrity.json`). `checkout-embedded`
+   and `funnel-one-click-node` build their policy from it at start
+   (`vora-csp.ts`): they read the version `public/index.html` pins, pick the
+   list for the key's mode (test or live, from its prefix), add `'self'`, and
+   allow no inline scripts. If the file cannot be fetched or does not match,
+   they refuse to start rather than guess a policy. So both need a key and
+   network access to start (the funnel no longer starts without keys), and a
+   re-pin of vora.js takes effect at the next restart.
 
 3. **Charge a saved card / recurring.** On the Node SDK pass
    `paymentMethod: { id: "vp_pmt_*" }` to `paymentIntents.create` (the SDK sends

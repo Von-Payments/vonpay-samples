@@ -236,6 +236,10 @@ async function main(): Promise<void> {
 
   let renewal: PaymentIntent;
   try {
+    // ⛔ In your billing job, the amount, currency, saved card and buyer come
+    // from YOUR subscription row (the price the customer agreed to, the card
+    // and buyer saved with it), never from a request or a queue message. The
+    // sample uses fixed values because it has no subscription table.
     const renewalParams: CreatePaymentIntentParams = {
       amount: 2999,
       currency: "USD",

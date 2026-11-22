@@ -6,31 +6,25 @@
     <title>Von Payments — Embedded checkout (Embedded Fields)</title>
 
     <!--
-      Embedded Fields browser SDK, loaded from the CDN.
+      Embedded Fields browser SDK, loaded from the CDN, PINNED to one version
+      with Subresource Integrity: the browser refuses the file if its bytes
+      differ from this hash. The hash is the published one for this version
+      (https://js.vonpay.com/integrity.json, key versions["v1.54.1"].sha384).
+      Change the version and the hash together when you re-pin.
 
-      This is the supported delivery channel for the browser SDK — there is
-      no public npm package to install. The script attaches a global `Vora`
-      constructor to `window`. The /v1/ channel auto-updates within the v1
-      major; pin a specific version with Subresource Integrity for stricter
-      supply-chain control (see README → "Pinning the SDK version").
+      This is the supported delivery channel for the browser SDK. The script
+      attaches a global `Vora` constructor to `window`.
+
+      The auto-update channel https://js.vonpay.com/v1/vora.js is a stated
+      choice, not the default: it ships new builds without a change on your
+      side, so it cannot carry an `integrity` hash (see README → "Pinning the
+      SDK version").
     -->
     <script
-      src="https://js.vonpay.com/v1/vora.js"
+      src="https://js.vonpay.com/v1.54.1/vora.js"
+      integrity="sha384-SZhMd+iYRArjDgHq08tAqKu5WZJ9V6cChe5udrnY3YQXyPlsfseQWqP8oKTaAjhP"
       crossorigin="anonymous"
     ></script>
-    <!--
-      No `integrity` attribute above because the /v1/ channel is mutable (it
-      auto-ships patch updates), so a fixed SRI hash would break on every
-      release. For stricter supply-chain control, pin a specific immutable
-      version and add its SRI hash instead — the published hash is on the docs
-      page. Example (replace the version + hash with the current published one):
-
-      <script
-        src="https://js.vonpay.com/v1.53.0/vora.js"
-        integrity="sha384-/cgW04ufp8aAyV9bRSGns6zXGri76k64htTLeCz1Wd8huca9dRagLc6BgY/ba5wl"
-        crossorigin="anonymous"
-      ></script>
-    -->
     <noscript>This embedded checkout requires JavaScript.</noscript>
 
     <style>

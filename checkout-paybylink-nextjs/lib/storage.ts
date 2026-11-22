@@ -118,6 +118,14 @@ function addUnmatchedPayment(link: PayLink, transactionId: string | undefined, n
   }
 }
 
+/** True when a reported payment matches the link's own amount and currency. */
+function paidAsPriced(link: PayLink, paid: { amount: number | null; currency: string | null }): boolean {
+  // `typeof`, not `!== null`: an event from an older server can leave a field out.
+  if (typeof paid.amount === "number" && paid.amount !== link.amount) return false;
+  if (typeof paid.currency === "string" && paid.currency.toUpperCase() !== link.currency.toUpperCase()) return false;
+  return true;
+}
+
 /**
  * Set a link's status from `charge.succeeded` or `charge.failed`.
  *
@@ -137,9 +145,25 @@ export function updateStatus(
   sessionId: string,
   status: "paid" | "failed",
   transactionId?: string,
+  paid?: { amount: number | null; currency: string | null },
 ): PayLink | undefined {
   const link = getLinkBySessionId(sessionId);
   if (!link) return undefined;
+
+  // ⛔ A success for a different amount or currency than the link asked for is
+  // not this link's payment as priced: a person checks it before anything
+  // ships. An amount or currency the event did not report is not a mismatch.
+  if (status === "paid" && paid !== undefined && !paidAsPriced(link, paid)) {
+    const next = copyOf(link);
+    next.status = "needs_review";
+    next.reviewNote = `A payment of ${paid.amount} ${paid.currency} (minor units) was reported; the link asks for ${link.amount} ${link.currency}.`;
+    if (transactionId && !isKnownPayment(next, transactionId)) {
+      if (next.transactionId === undefined) next.transactionId = transactionId;
+      else next.otherPayments = [...(next.otherPayments ?? []), { transactionId, refundedAmount: 0 }];
+    }
+    store.set(next.id, next);
+    return next;
+  }
 
   if (status === "failed") {
     if (link.status !== "pending") return link;

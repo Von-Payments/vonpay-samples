@@ -74,11 +74,31 @@ interface OrderRecord {
   orderId: string;
   amount: number; // minor units, exactly as sent to sessions.create()
   currency: string;
+  /**
+   * Set by the webhook. "needs_review": a payment arrived for a different
+   * amount or currency, so a person checks it before anything ships.
+   */
+  status: "pending" | "paid" | "failed" | "needs_review";
 }
 const ordersBySession = new Map<string, OrderRecord>();
 
-// The cookie that ties a return to the browser that started the checkout.
-const CHECKOUT_COOKIE = "vonpay_checkout_session";
+// The cookie that ties a return to the browser that started the checkout. It
+// holds a random reference that only this server can map to the session, not
+// the session id itself: the session id is in the return URL and the checkout
+// page, and a cookie value anyone can read off a URL proves nothing about the
+// browser.
+const CHECKOUT_COOKIE = "vonpay_checkout_ref";
+const sessionByCheckoutRef = new Map<string, string>();
+
+// ⚠ In memory, so a flood of POST /checkout grows these maps without limit.
+// At the cap this server refuses new checkouts (503) rather than forget an
+// order someone may be paying. A real app keeps orders in its database.
+const MAX_OPEN_CHECKOUTS = 10_000;
+
+// Webhook event ids (`vp_evt_*`) already processed to completion. Recorded
+// only AFTER the handler succeeded, so a failed attempt is retried, not
+// dropped. A real app keeps these in a table with a UNIQUE event id.
+const handledEventIds = new Set<string>();
 
 function readCookie(header: string | undefined, name: string): string | undefined {
   for (const part of (header ?? "").split(";")) {
@@ -95,7 +115,15 @@ function readCookie(header: string | undefined, name: string): string | undefine
 }
 
 // ── Create checkout session ──────────────────────────────────────────
+// ⚠ Before deploying, rate-limit this route (per IP and per buyer) and put
+// bot protection in front of it. Every call creates a checkout session on
+// your key, and an open route like this is what card testers look for. This
+// sample has neither.
 app.post("/checkout", async (_req, res) => {
+  if (ordersBySession.size >= MAX_OPEN_CHECKOUTS) {
+    res.status(503).json({ error: "Too many open checkouts. Please try again later." });
+    return;
+  }
   // Stand-in for YOUR order id — in a real app, create the order first and use its id.
   const orderId = `order_${randomUUID()}`;
   const amount = 2500;
@@ -115,10 +143,13 @@ app.post("/checkout", async (_req, res) => {
     );
     // Remember which order this session pays for, on YOUR server. The return
     // page looks the order up from this record, never from the URL.
-    ordersBySession.set(session.id, { orderId, amount, currency });
-    // And tie the return to this browser. HttpOnly: page scripts cannot read
-    // it. SameSite=Lax: it still comes back on the redirect from checkout.
-    res.cookie(CHECKOUT_COOKIE, session.id, {
+    ordersBySession.set(session.id, { orderId, amount, currency, status: "pending" });
+    // And tie the return to this browser, by a random reference mapped to the
+    // session on this server. HttpOnly: page scripts cannot read it.
+    // SameSite=Lax: it still comes back on the redirect from checkout.
+    const checkoutRef = randomUUID();
+    sessionByCheckoutRef.set(checkoutRef, session.id);
+    res.cookie(CHECKOUT_COOKIE, checkoutRef, {
       httpOnly: true,
       sameSite: "lax",
       path: "/",
@@ -126,7 +157,9 @@ app.post("/checkout", async (_req, res) => {
     });
     res.redirect(303, session.checkoutUrl);
   } catch (err) {
-    console.error("Checkout error:", err);
+    // Log only the message: the full error object can carry request details
+    // you do not want in your logs.
+    console.error("Checkout error:", err instanceof Error ? err.message : String(err));
     res.status(500).json({ error: "Failed to create checkout session" });
   }
 });
@@ -157,6 +190,14 @@ app.post("/webhooks", (req, res) => {
     return;
   }
 
+  // Dedupe on `event.id` (`vp_evt_*`), unique per outbound event. A
+  // redelivery (after a timeout or a 5xx, or a manual resend) carries the same
+  // id: acknowledge it with 200 and do nothing else.
+  if (handledEventIds.has(event.id)) {
+    res.json({ received: true, deduped: true });
+    return;
+  }
+
   // Branch on event type. `charge.succeeded` is the event that means the buyer
   // actually paid; do NOT fulfill orders on `charge.failed`. Session IDs
   // are deep-link tokens — keep them out of general application logs and only
@@ -167,22 +208,60 @@ app.post("/webhooks", (req, res) => {
   // unknown event key, stores nothing and returns success. An endpoint
   // subscribed to it receives nothing, forever, and no error is raised at any
   // layer. `charge.*` is the subscribable family.
-  switch (event.type) {
-    case "charge.succeeded":
-      // Replace this with your order-fulfillment logic. `event.data.session_id`
-      // and `event.data.transaction_id` are available here; pass them to your
-      // fulfillment system but avoid logging them verbatim. Dedupe on
-      // `event.id` so a redelivery cannot fulfill the same order twice.
-      break;
-    case "charge.failed":
-      // Payment did not complete — do not fulfill.
-      // `event.data.failure_reason` is the buyer-safe explanation.
-      break;
-    default:
-      // Unknown event type — accept the webhook (ack 200) but take no action.
-      break;
+  try {
+    switch (event.type) {
+      case "charge.succeeded": {
+        // Find YOUR order for this session. No order: not a checkout this
+        // server started (or it restarted and forgot). Acknowledge: a retry
+        // cannot make the order appear.
+        const order = event.data.session_id ? ordersBySession.get(event.data.session_id) : undefined;
+        if (!order) {
+          console.warn(`Webhook ${event.type}: no order for this session; nothing fulfilled.`);
+          break;
+        }
+        // ⛔ Check what was paid against the order before fulfilling. A
+        // payment for another amount or currency is not this order as priced:
+        // hold it for a person. A field the event leaves out is not a mismatch.
+        const { amount, currency } = event.data;
+        const amountDiffers = typeof amount === "number" && amount !== order.amount;
+        const currencyDiffers = typeof currency === "string" && currency.toUpperCase() !== order.currency;
+        if (amountDiffers || currencyDiffers) {
+          order.status = "needs_review";
+          console.error(`Order ${order.orderId}: paid ${amount} ${currency}, expected ${order.amount} ${order.currency}. Not fulfilled.`);
+          break;
+        }
+        if (order.status !== "paid") {
+          order.status = "paid";
+          // Replace this with your order-fulfillment logic (mark the order row
+          // paid, ship, send the receipt). Pass `event.data.transaction_id` to
+          // your fulfillment system but avoid logging it verbatim.
+          console.log(`Order ${order.orderId} paid.`);
+        }
+        break;
+      }
+      case "charge.failed": {
+        // Payment did not complete — do not fulfill.
+        // `event.data.failure_reason` is the buyer-safe explanation.
+        // ⛔ A failure never undoes a payment: events arrive out of order, and
+        // a declined first attempt can land after the payment that went through.
+        const order = event.data.session_id ? ordersBySession.get(event.data.session_id) : undefined;
+        if (order?.status === "pending") order.status = "failed";
+        break;
+      }
+      default:
+        // Unknown event type — accept the webhook (ack 200) but take no action.
+        break;
+    }
+  } catch (err) {
+    // OUR handler failed (a database write, say). 500 so the sender retries;
+    // the event is not recorded, so the retry runs the handler again.
+    console.error("Webhook handler failed:", err instanceof Error ? err.message : String(err));
+    res.status(500).json({ error: "Handler failed" });
+    return;
   }
 
+  // Record the event only now, after it was processed without throwing.
+  handledEventIds.add(event.id);
   res.json({ received: true });
 });
 
@@ -197,6 +276,9 @@ const NOT_MATCHED_PAGE =
 
 app.get("/success", async (req, res) => {
   const params = req.query as Record<string, string>;
+  // This URL carries the session id and the signed return query. Send no
+  // Referer from this page, so a link or an asset on it cannot pass them on.
+  res.set("Referrer-Policy", "no-referrer");
 
   // ⚠️ Match the return to an order YOUR server created, before anything else.
   // `confirmReturn` answers "did this session succeed?" for ANY session on
@@ -207,7 +289,8 @@ app.get("/success", async (req, res) => {
   // `confirmReturn` below: `expectedSessionId` refuses a return that names any
   // other session, and `expectedAmount` + `expectedCurrency` refuse a session
   // paid for a different figure.
-  const sessionId = readCookie(req.headers.cookie, CHECKOUT_COOKIE) ?? "";
+  const checkoutRef = readCookie(req.headers.cookie, CHECKOUT_COOKIE);
+  const sessionId = (checkoutRef && sessionByCheckoutRef.get(checkoutRef)) ?? "";
   const order = sessionId ? ordersBySession.get(sessionId) : undefined;
   if (!order) {
     res.status(400).send(NOT_MATCHED_PAGE);
@@ -350,7 +433,7 @@ app.get("/health", async (_req, res) => {
     const health = await vonpay.health();
     res.json(health);
   } catch (err) {
-    console.error("Health check failed:", err);
+    console.error("Health check failed:", err instanceof Error ? err.message : String(err));
     res.status(503).json({ status: "unreachable" });
   }
 });

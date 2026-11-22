@@ -17,7 +17,7 @@ The handler shows:
 - **One-call verify + parse** with the SDK's `webhooks.constructEvent` - it verifies the HMAC, enforces the replay window, accepts a rotation grace signature, and returns a typed event. No hand-rolled crypto.
 - **Raw-body parsing** (`express.raw` mounted *before* `express.json`) - webhook signatures are computed over the original bytes, not over re-serialized JSON.
 - **Idempotent processing** - a per-event guard so a redelivery (after a 5xx, a manual resend, or a secret rotation) doesn't double-fulfill. The guard is an **early return before the event handler runs** (`server.ts`, search for `isFirstDelivery`). ⚠️ Until 2026-09-12 this sample COMPUTED that flag and used it only in a log line, so the handler ran on every redelivery while this bullet promised it did not - copy the early-return shape, not just the flag.
-- **Correct error responses** - `400 { error: "Invalid signature" }` on verification failure; `200` on a handler bug *after* a valid signature (don't make Von Payments retry your bug).
+- **Correct error responses** - `400 { error: "Invalid signature" }` on verification failure; `500` when your handler fails *after* a valid signature, so Von Payments retries the delivery (the event is not marked done, so the retry runs the handler again); `200` only after the handler succeeded, or for a duplicate it already handled.
 - **Safe logging** - log `err.message`, never the full error object or the raw body (both can carry signature/HMAC bytes and, on a future schema bump, PII).
 
 ## 5-minute setup
@@ -147,9 +147,9 @@ Events arrive in **no guaranteed order**, `charge.*` and `subscription.*` includ
 
 Before flipping this code at `vp_sk_live_*`:
 
-- **Persistent idempotency store.** The in-memory `Set` evaporates on process restart and does not deduplicate across instances behind a load balancer. Replace with one of:
-  - Redis with a `SET event:<key> 1 EX 86400 NX` (returns nil → already handled, return 200 immediately)
-  - Postgres `INSERT INTO processed_events (event_key) ON CONFLICT DO NOTHING` and check the affected-row count
+- **Persistent idempotency store.** The in-memory `Set` evaporates on process restart and does not deduplicate across instances behind a load balancer. Keep the sample's order: an event counts as handled only AFTER the handler succeeded. Recording it on arrival turns a failed first attempt into a dropped order, because every retry then reads as a duplicate. Replace the `Set` with one of:
+  - Postgres: a `processed_events` table with a UNIQUE event id and a `status` column. Claim with `INSERT … (event_key, status) VALUES ($1, 'processing') ON CONFLICT DO NOTHING`; zero rows inserted means another delivery has it (answer 200 if its status is `completed`). Set `completed` after the handler succeeds; delete the row if the handler throws, so the retry can claim it.
+  - Redis: claim with `SET event:<key> processing EX 300 NX` (nil means another delivery has it), then `SET event:<key> completed EX 86400` after the handler succeeds, and `DEL event:<key>` if it throws. The short expiry on the claim frees the key if the process dies mid-handler.
 - **Log carefully.** The structured log lines above are the right shape - event type, merchant id, amounts. **Never log the secret, never log the raw body** (it contains the signature, and on a future schema bump may carry PII), and keep session/transaction IDs out of general application logs - they are deep-link tokens with the same trust boundary as the API key.
 - **Monitor delivery failures.** Alert on `level:warn route:/webhooks/vonpay msg:signature_verification_failed` - a sustained spike means the secret is out of sync or someone is probing your endpoint. Alert separately on `level:error msg:handler_failed_after_verification` - that's a bug *you* shipped, not a bad signature.
 - **Move the secrets out of `.env`.** Production secret managers: AWS Secrets Manager, HashiCorp Vault, GCP Secret Manager, Doppler, 1Password Secrets Automation. Never check `.env` into git (the `.gitignore` here already blocks it; respect it).
@@ -171,4 +171,4 @@ There is no `session.expired` / "buyer abandoned the checkout" event today. The 
 
 ## Tested against
 
-`@vonpay/checkout-node` 4.5+ · Node 20+ · Express 5
+`@vonpay/checkout-node` 4.13+ · Node 20+ · Express 5

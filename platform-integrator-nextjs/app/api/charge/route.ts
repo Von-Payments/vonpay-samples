@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { VonPayCheckout } from "@vonpay/checkout-node";
 import { getTenant, getTenantCredentials } from "@/lib/tenants";
 import { getCustomer } from "@/lib/customers";
-import { saveOrder } from "@/lib/orders";
+import { getOrderBySession, hasRoomForOrder, saveOrder } from "@/lib/orders";
 
 // The shape the tenant page mints: `ord_` + a random (v4) UUID. Anything else
 // is refused rather than used as a key, so a missing or free-form value can
@@ -63,8 +63,12 @@ export async function POST(req: NextRequest) {
   try {
     credentials = getTenantCredentials(tenantId);
   } catch (err) {
-    console.error("Tenant credential lookup failed:", err);
+    console.error("Tenant credential lookup failed:", err instanceof Error ? err.message : String(err));
     return NextResponse.json({ error: "tenant_credentials_missing" }, { status: 500 });
+  }
+
+  if (!hasRoomForOrder()) {
+    return NextResponse.json({ error: "too_many_open_orders" }, { status: 503 });
   }
 
   const baseUrl = process.env.BASE_URL ?? new URL(req.url).origin;
@@ -109,6 +113,22 @@ export async function POST(req: NextRequest) {
       },
     );
 
+    // ⛔ The same order id always returns the same session (the key above), so
+    // a repeat can name a session this server already recorded. Keep the FIRST
+    // record: it says what that session charges. A repeat of the same order
+    // for the same customer is a double click and goes on to the same session.
+    // The same order id for a DIFFERENT customer is refused: overwriting the
+    // record would make the confirm page and the webhook check the session
+    // against the wrong customer and amount.
+    const existing = getOrderBySession(session.id);
+    if (existing !== undefined) {
+      if (existing.tenantId !== tenantId || existing.orderId !== orderId || existing.customerId !== customer.id) {
+        console.error(`Order id ${orderId} reused for another customer of tenant ${tenantId}; refused.`);
+        return NextResponse.json({ error: "order_id_reused" }, { status: 409 });
+      }
+      return NextResponse.redirect(session.checkoutUrl, 303);
+    }
+
     // Remember which tenant and order this session pays for, on YOUR server.
     // The confirm page looks the order up from this record, never from the URL.
     saveOrder(session.id, {
@@ -125,7 +145,10 @@ export async function POST(req: NextRequest) {
     // Log the detail server-side only. Never forward String(err) to the caller
     // — a VonPayError message can carry a request id, decline code, or key
     // prefix that should not leave the server.
-    console.error(`Session create failed for tenant ${tenantId}:`, err);
+    console.error(
+      `Session create failed for tenant ${tenantId}:`,
+      err instanceof Error ? err.message : String(err),
+    );
     return NextResponse.json(
       { error: "session_create_failed" },
       { status: 502 },

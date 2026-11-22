@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { VonPayCheckout } from "@vonpay/checkout-node";
-import { CHECKOUT_COOKIE, saveOrder } from "@/lib/orders";
+import { CHECKOUT_COOKIE, hasRoomForCheckout, saveOrder } from "@/lib/orders";
 
 const vonpay = new VonPayCheckout({
   apiKey: process.env.VON_PAY_SECRET_KEY!,
@@ -13,7 +13,14 @@ const vonpay = new VonPayCheckout({
   // },
 });
 
+// ⚠ Before deploying, rate-limit this route (per IP and per buyer) and put bot
+// protection in front of it. Every call creates a checkout session on your
+// key, and an open route like this is what card testers look for. This sample
+// has neither.
 export async function POST() {
+  if (!hasRoomForCheckout()) {
+    return NextResponse.json({ error: "Too many open checkouts. Please try again later." }, { status: 503 });
+  }
   // Stand-in for YOUR order id — in a real app, create the order first and use its id.
   const orderId = `order_${crypto.randomUUID()}`;
   const amount = 2500;
@@ -35,12 +42,13 @@ export async function POST() {
 
     // Remember which order this session pays for, on YOUR server. The confirm
     // page looks the order up from this record, never from the URL.
-    saveOrder(session.id, { orderId, amount, currency });
+    const checkoutRef = saveOrder(session.id, { orderId, amount, currency, status: "pending" });
 
     const res = NextResponse.json({ checkoutUrl: session.checkoutUrl });
-    // And tie the return to this browser. HttpOnly: page scripts cannot read
-    // it. SameSite=Lax: it still comes back on the redirect from checkout.
-    res.cookies.set(CHECKOUT_COOKIE, session.id, {
+    // And tie the return to this browser, by a random reference that only this
+    // server maps to the session. HttpOnly: page scripts cannot read it.
+    // SameSite=Lax: it still comes back on the redirect from checkout.
+    res.cookies.set(CHECKOUT_COOKIE, checkoutRef, {
       httpOnly: true,
       sameSite: "lax",
       path: "/",
@@ -48,7 +56,8 @@ export async function POST() {
     });
     return res;
   } catch (err) {
-    console.error("Checkout error:", err);
+    // Log only the message: the full error object can carry request details.
+    console.error("Checkout error:", err instanceof Error ? err.message : String(err));
     return NextResponse.json({ error: "Failed to create checkout session" }, { status: 500 });
   }
 }

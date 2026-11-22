@@ -56,8 +56,8 @@ app/api/links/route.ts             - POST create / GET list
 app/api/links/[id]/route.ts        - GET single link
 app/api/webhooks/route.ts          - HMAC webhook verification, dedupe on event id, status update
 lib/storage.ts                     - in-memory link store (dev-only; swap for DB in prod)
-proxy.ts                           - sign-in for the dashboard and /api/links (ADMIN_TOKEN)
-next.config.ts                     - CSP / HSTS / X-Frame-Options / Referrer-Policy headers
+proxy.ts                           - sign-in for the dashboard and /api/links (ADMIN_TOKEN) + the per-request Content Security Policy (lib/csp.ts)
+next.config.ts                     - HSTS / X-Frame-Options / Referrer-Policy headers
 ```
 
 The `sessions.create()` call is the same one the cart → redirect sample makes - the difference is that here the merchant operator creates the session ahead of time (no buyer cart) and surfaces the URL out-of-band (email, SMS, QR). The create call sends an idempotency key derived from the link's own id, so a retry for the same link returns the same session instead of creating a second one. `cancelUrl` points back at the link detail page so a buyer who bails can resume from the same link.
@@ -78,9 +78,10 @@ Webhooks carry an `x-vonpay-signature` header of the form `t=<unix-seconds>,v1=<
 | `failed` | An attempt failed, and the buyer can try again | `charge.failed` on a pending link |
 | `paid` | One payment went through | `charge.succeeded`. A partial refund keeps `paid` and records the refunded amount |
 | `refunded` | That one payment was refunded in full | `charge.refunded` for that payment, once the total refunded reaches the payment's amount |
-| `needs_review` | The events do not add up to one payment. A person checks before you fulfil or refund | A second payment, a refund of a payment this link does not hold, or a refund of an unknown amount |
+| `needs_review` | The events do not add up to one payment. A person checks before you fulfil or refund | A second payment, a payment for a different amount or currency than the link asks for, a refund of a payment this link does not hold, or a refund of an unknown amount |
 
 - **A payment is never undone by a failure.** A `charge.failed` that arrives late (a declined first attempt, say) never changes a `paid`, `refunded` or `needs_review` link.
+- **A success is checked against the link's price.** `charge.succeeded` carries `amount` and `currency`. If either differs from the link, the link goes to `needs_review`, not `paid`. A field the event leaves out is not a mismatch.
 - **A second success is compared by transaction id.** The same id is the same payment reported again, and nothing changes. A different id is a second payment: the link goes to `needs_review` and keeps both ids. Compare `vp_tx_id`. `transaction_id` is the fallback, because two events for one payment can carry different values in it.
 - **A refund is matched to a payment, not to the link.** A checkout session takes one payment. If a second one is captured anyway (a form left open in another tab, say), the payment system can refund it automatically, and you see a refund you did not issue. Its `reason` does not identify it; its transaction id does. The first payment still stands, so the link goes to `needs_review` and never to `refunded`. Do not charge the buyer again.
 - **Full or partial comes from the totals.** Compare `amount_refunded_total` with `original_charge_amount`. Do not read `amount` or `is_partial`: on a second partial refund, they differ between payment connections. If `amount_refunded_total` is `null`, the sample adds up `refund_amount`. If both are `null`, the link goes to `needs_review`.
@@ -90,12 +91,12 @@ This sample has no button to close a review. Give your staff one in your own sys
 
 ## Security notes
 
-- **The dashboard and `/api/links` need a password.** `proxy.ts` puts them behind HTTP Basic auth: set `ADMIN_TOKEN` to a long random value (for example `openssl rand -hex 32`); the browser asks once, and any user name works. In production (`NODE_ENV=production`, which `next start` and production hosts set) the dashboard and `/api/links` answer `403` until `ADMIN_TOKEN` is set, so a missing setting never leaves them open. Under `npm run dev` with no `ADMIN_TOKEN` they stay open for local testing. These routes create sessions with your API key and show every link's `checkoutUrl`. The buyer's pages (`/confirm`) and `/api/webhooks` stay open; every other path needs the password, including any page or route you add later (to open a new buyer-facing path, add it to the exception list in `proxy.ts`). A request that changes something (a `POST` to `/api/links`) must also come from this site's own pages, so another web site cannot use a signed-in browser to create links. Replace this with your own sign-in before handing it to real merchants.
+- **The dashboard and `/api/links` need a password.** `proxy.ts` puts them behind HTTP Basic auth: set `ADMIN_TOKEN` to a long random value (for example `openssl rand -hex 32`); the browser asks once, and any user name works. In production (`NODE_ENV=production`, which `next start` and production hosts set) the dashboard and `/api/links` answer `403` until `ADMIN_TOKEN` is set, so a missing setting never leaves them open. Under `npm run dev` with no `ADMIN_TOKEN` they stay open for local testing. These routes create sessions with your API key and show every link's `checkoutUrl`. The buyer's pages (`/confirm`) and `/api/webhooks` stay open; every other path needs the password, including any page or route you add later (to open a new buyer-facing path, add it to `BUYER_PATH` in `proxy.ts`). A request that changes something (a `POST` to `/api/links`) must also come from this site's own pages, so another web site cannot use a signed-in browser to create links. Replace this with your own sign-in before handing it to real merchants.
 - **Always use raw body for webhook verification.** Next.js route handlers give you `req.text()` - use it directly, don't `JSON.parse()` first.
 - **Pin the SDK.** `"latest"` drifts silently; this sample pins the major (`^4.13.0`) and commits a lockfile.
 - **In-memory storage is dev-only.** `lib/storage.ts` uses a `Map` that resets on server restart. In production, persist to Postgres / SQLite / Redis and scope link rows to the authenticated merchant operator.
 - **Two different secrets.** The webhook signing secret (`whsec_…`, set as `VON_PAY_WEBHOOK_SECRET`) signs webhooks. The API key (`vp_sk_*`) authenticates API calls and is what confirms a return. A per-merchant session signing secret (`ss_*`) is not used: it cannot verify the return redirect. Never swap them.
-- **Security headers ship in `next.config.ts`.** Remove them only if you have a deliberate reason.
+- **Security headers.** `proxy.ts` sets a Content Security Policy with a new nonce on every page (`lib/csp.ts`), the form the [Next.js guide](https://nextjs.org/docs/app/guides/content-security-policy) gives for a strict policy. A fixed `script-src 'self'` would block the small inline scripts the App Router writes into each page, and the page's buttons and forms would never run. `next.config.ts` sets HSTS, X-Frame-Options, Referrer-Policy and the other fixed headers. Remove them only if you have a deliberate reason.
 - **Link URLs are bearer tokens.** Anyone with a `checkoutUrl` can complete the payment on that session. Treat them like one-time tokens: use TLS everywhere, expire them server-side, and don't email them through unencrypted channels.
 
 ## Deploying

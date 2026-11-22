@@ -1,11 +1,15 @@
 {
-  "_": "Same shape works across most MCP clients. Drop into ~/.claude.json (Claude Code), claude_desktop_config.json (Claude Desktop), or ~/.cursor/mcp.json (Cursor). Continue.dev uses a slightly different shape — see README.md. Merge with your existing mcpServers object — don't overwrite.",
+  "_": "Same shape works across most MCP clients. Drop into ~/.claude.json (Claude Code), claude_desktop_config.json (Claude Desktop), or ~/.cursor/mcp.json (Cursor). Continue.dev uses a slightly different shape — see README.md. Merge with your existing mcpServers object — don't overwrite. The version is pinned so a new release reaches your agent only when you change it. VONPAY_MCP_TOOLS=read registers only the tools that read; remove it to let the agent charge, refund or change subscriptions. On a sandbox key (vp_sk_test_) those run with no approval prompt.",
   "mcpServers": {
     "vonpay-checkout": {
       "command": "npx",
-      "args": ["-y", "@vonpay/checkout-mcp"],
+      "args": [
+        "-y",
+        "@vonpay/checkout-mcp@6.10.0"
+      ],
       "env": {
-        "VON_PAY_SECRET_KEY": "vp_sk_test_REPLACE_ME"
+        "VON_PAY_SECRET_KEY": "vp_sk_test_REPLACE_ME",
+        "VONPAY_MCP_TOOLS": "read"
       }
     }
   }

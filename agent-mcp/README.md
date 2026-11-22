@@ -12,7 +12,7 @@ Wire any MCP-compatible AI agent into Von Payments. After this walkthrough, your
 
 The wiring is identical across all of them. Only the config-file path changes.
 
-This sample is read-only - no code to run, no server to host. Five files (`README.md`, `CLAUDE.md`, `.claude.json.example`, `.env.example`, `package.json`) you reference from your own project. The agent does the work.
+This sample is read-only - no code to run, no server to host. Six files (`README.md`, `CLAUDE.md`, `.claude.json.example`, `.env.example`, `package.json`, `package-lock.json`) you reference from your own project. The agent does the work.
 
 ## 5-minute setup
 
@@ -27,10 +27,12 @@ Test payments run on a sandbox account backed by a payment provider's test envir
 ### 2. Install the MCP server
 
 ```bash
-npm install -g @vonpay/checkout-mcp
+npm install -g @vonpay/checkout-mcp@6.10.0
 ```
 
-You don't need to launch it manually - the MCP client (whichever one you use) starts it per session via stdio. If you'd rather not install globally, use `npx -y @vonpay/checkout-mcp` in the config below; the runtime fetches it on demand.
+You don't need to launch it manually - the MCP client (whichever one you use) starts it per session via stdio. If you'd rather not install globally, the config below runs `npx -y @vonpay/checkout-mcp@6.10.0`; the runtime fetches it on demand.
+
+**Pin the version.** The config names an exact version, so a new release never reaches your agent until you choose it. Without a version, `npx -y` fetches whatever is newest each time the client starts, with no prompt. To upgrade, read the [changelog](https://www.npmjs.com/package/@vonpay/checkout-mcp?activeTab=versions), then change the version in your config.
 
 ### 3. Wire it into your MCP client
 
@@ -45,8 +47,11 @@ Edit `~/.claude.json`. Add the `vonpay-checkout` entry under `mcpServers`:
   "mcpServers": {
     "vonpay-checkout": {
       "command": "npx",
-      "args": ["-y", "@vonpay/checkout-mcp"],
-      "env": { "VON_PAY_SECRET_KEY": "vp_sk_test_..." }
+      "args": ["-y", "@vonpay/checkout-mcp@6.10.0"],
+      "env": {
+        "VON_PAY_SECRET_KEY": "vp_sk_test_...",
+        "VONPAY_MCP_TOOLS": "read"
+      }
     }
   }
 }
@@ -74,6 +79,8 @@ The MCP server speaks the standard stdio transport. Spawn the binary as a subpro
 
 A copy-paste-ready version of the standard `mcpServers` block is in [`.claude.json.example`](.claude.json.example).
 
+**The config starts read-only.** `VONPAY_MCP_TOOLS=read` registers only the 14 tools that read: nothing that charges, captures, voids, refunds, saves a card, creates a session or changes a subscription or a product. When you want the agent to run payments on your sandbox, remove that line (or set it to `all`) and restart the client. ⚠️ On a sandbox key (`vp_sk_test_*`) the write tools run as soon as the agent calls them: there is no approval prompt. Only a live key asks a person first (see [Live keys](#live-keys-every-money-moving-call-needs-a-person-to-approve-it)).
+
 ### 4. Drop the CLAUDE.md snippet into your project
 
 Copy [`CLAUDE.md`](CLAUDE.md) into the root of any project that uses Von Payments. It teaches the agent the auth scheme, key prefixes, SDK packages and how to check their current versions, error envelope shape, MCP tools, and discovery endpoints, all in one file the agent reads on project open.
@@ -84,13 +91,13 @@ File-name conventions by client:
 
 ### 5. Restart the client. Confirm tools appear.
 
-In Claude Code: type `/mcp`. You should see `vonpay-checkout` with 34 tools. In Cursor: the Tools panel shows the same list. In Claude Desktop: the 🔌 icon appears in the input box.
+In Claude Code: type `/mcp`. You should see `vonpay-checkout` with 14 tools in read-only mode, or 35 with every tool. In Cursor: the Tools panel shows the same list. In Claude Desktop: the 🔌 icon appears in the input box.
 
 If nothing shows up, check the MCP server logs - usually a missing or malformed `VON_PAY_SECRET_KEY`.
 
 ## What the agent can do
 
-34 tools in six groups (checkout-mcp 6.9 or later). To give an agent only the tools that read - nothing that charges, refunds, saves a card, creates a session or changes a subscription - set `VONPAY_MCP_TOOLS=read` in the server's environment, and use a key that holds only read permissions.
+35 tools in six groups (checkout-mcp 6.10.0 or later). To give an agent only the tools that read - nothing that charges, refunds, saves a card, creates a session or changes a subscription - set `VONPAY_MCP_TOOLS=read` in the server's environment, and use a key that holds only read permissions.
 
 ### Hosted checkout
 
@@ -124,6 +131,7 @@ If nothing shows up, check the MCP server logs - usually a missing or malformed 
 |---|---|
 | `vonpay_checkout_list_subscription_products` / `vonpay_checkout_get_subscription_product_terms` | List your subscription products, or read one product's renewal terms (read-only) |
 | `vonpay_checkout_list_subscriptions` / `vonpay_checkout_get_subscription` | List subscriptions or read one (status, price, interval, next bill date, discount, pause, scheduled cancel). Read-only |
+| `vonpay_checkout_list_subscription_attempts` | List one subscription's payment tries, newest first (sign-up, renewals and retries, "Bill now", card-update payments) with outcome and decline code. Read-only. Needs checkout-mcp 6.10.0 or later |
 | `vonpay_checkout_cancel_subscription` / `vonpay_checkout_unschedule_subscription_cancel` | Cancel now or at the end of the paid period (a cancel never refunds); withdraw a scheduled cancel |
 | `vonpay_checkout_pause_subscription` / `vonpay_checkout_resume_subscription` / `vonpay_checkout_skip_subscription_renewal` | Pause renewals, resume them, or skip the next one |
 | `vonpay_checkout_set_subscription_next_bill_date` / `vonpay_checkout_set_subscription_interval` / `vonpay_checkout_set_subscription_price` | Move the next bill date, change how often it renews, or set the renewal price |
@@ -153,7 +161,7 @@ Each product write needs an `idempotencyKey` on every key (there is no dry run),
 
 ## Example agent prompts
 
-Drop these into your chat surface to verify the wiring works.
+Drop these into your chat surface to verify the wiring works. The ones that create a session or move money need every tool: remove `VONPAY_MCP_TOOLS=read` from the config first, on a sandbox key.
 
 ### Create a session
 ```
@@ -224,7 +232,7 @@ The MCP server itself is model-agnostic - it speaks the protocol, not the model.
 
 ## Live keys: every money-moving call needs a person to approve it
 
-This sample uses a sandbox key (`vp_sk_test_*`). Sandbox keys are never gated - every tool runs as soon as the agent calls it.
+This sample uses a sandbox key (`vp_sk_test_*`). Sandbox keys are never gated - every tool runs as soon as the agent calls it, with no approval prompt. That is why the sample config starts with `VONPAY_MCP_TOOLS=read`.
 
 With a live key (`vp_sk_live_*`), five tools move real money: `create_payment_intent`, `capture_payment_intent`, `void_payment_intent`, `create_refund`, and `create_token` when it saves a reusable card (`setupForFutureUse` set). For each of those calls, the MCP server asks **the person** - not the agent - to approve that specific action, amount and id through your MCP client's own confirmation prompt. The call goes to Von Payments only if they accept. If they decline, dismiss it, or do not answer within 5 minutes, nothing is sent. Approval never carries over to the next call.
 

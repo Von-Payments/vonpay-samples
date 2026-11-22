@@ -2,14 +2,17 @@
 
 import os
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, Set
 
-from flask import Flask, redirect, request, jsonify
+from flask import Flask, Response, redirect, request, jsonify
 from flask.typing import ResponseReturnValue
 from markupsafe import escape
 from vonpay.checkout import VonPayCheckout, VonPayError
 
 app = Flask(__name__)
+# A real webhook delivery is a few kilobytes. Flask refuses a larger body (413)
+# before reading it, so an unsigned request cannot make this app buffer more.
+app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024
 
 API_KEY = os.environ["VON_PAY_SECRET_KEY"]
 # Per-endpoint webhook signing secret (whsec_…), shown once when you create the
@@ -50,12 +53,31 @@ def index():
 # handler marks the same row paid).
 ORDERS_BY_SESSION: Dict[str, Dict[str, Any]] = {}
 
-# The cookie that ties a return to the browser that started the checkout.
-CHECKOUT_COOKIE = "vonpay_checkout_session"
+# The cookie that ties a return to the browser that started the checkout. It
+# holds a random reference that only this server maps to the session, not the
+# session id itself: the session id is in the return URL for anyone to read.
+CHECKOUT_COOKIE = "vonpay_checkout_ref"
+SESSION_BY_CHECKOUT_REF: Dict[str, str] = {}
+
+# ⚠ In memory, so a flood of POST /checkout grows these maps without limit. At
+# the cap this app refuses new checkouts (503) rather than forget an order
+# someone may be paying. A real app keeps orders in its database.
+MAX_OPEN_CHECKOUTS = 10_000
+
+# Webhook event ids (``vp_evt_*``) processed to completion. Recorded only AFTER
+# the handler succeeded, so a failed attempt is retried, not dropped. A real
+# app keeps these in a table with a UNIQUE event id.
+HANDLED_EVENT_IDS: Set[str] = set()
 
 
+# ⚠ Before deploying, rate-limit /checkout (per IP and per buyer) and put bot
+# protection in front of it. Every call creates a checkout session on your key,
+# and an open route like this is what card testers look for. This sample has
+# neither.
 @app.post("/checkout")
 def create_checkout():
+    if len(ORDERS_BY_SESSION) >= MAX_OPEN_CHECKOUTS:
+        return jsonify({"error": "Too many open checkouts. Please try again later."}), 503
     # Stand-in for YOUR order id — in a real app, create the order first and use its id.
     order_id = f"order_{uuid.uuid4()}"
     amount = 1499
@@ -73,13 +95,17 @@ def create_checkout():
         "order_id": order_id,
         "amount": amount,  # minor units, exactly as sent above
         "currency": currency,
+        "status": "pending",
     }
     response = redirect(session.checkout_url)
-    # And tie the return to this browser. HttpOnly: page scripts cannot read
-    # it. SameSite=Lax: it still comes back on the redirect from checkout.
+    # And tie the return to this browser, by a random reference mapped to the
+    # session on this server. HttpOnly: page scripts cannot read it.
+    # SameSite=Lax: it still comes back on the redirect from checkout.
+    checkout_ref = str(uuid.uuid4())
+    SESSION_BY_CHECKOUT_REF[checkout_ref] = session.id
     response.set_cookie(
         CHECKOUT_COOKIE,
-        session.id,
+        checkout_ref,
         httponly=True,
         samesite="Lax",
         path="/",
@@ -111,6 +137,12 @@ def webhooks() -> ResponseReturnValue:
     if event.test_event:
         return jsonify({"received": True})
 
+    # Dedupe on ``event.id`` (``vp_evt_*``), unique per outbound event. A
+    # redelivery (after a timeout or a 5xx, or a manual resend) carries the same
+    # id: acknowledge it with 200 and do nothing else.
+    if event.id in HANDLED_EVENT_IDS:
+        return jsonify({"received": True, "deduped": True})
+
     # Branch on event type. `charge.succeeded` is the event that means the buyer
     # actually paid; do NOT fulfill orders on `charge.failed`. Session IDs
     # are deep-link tokens — keep them out of general application logs and only
@@ -121,17 +153,57 @@ def webhooks() -> ResponseReturnValue:
     # unknown event key, stores nothing and returns success. An endpoint
     # subscribed to it receives nothing, forever, and no error is raised at any
     # layer. `charge.*` is the subscribable family.
-    if event.type == "charge.succeeded":
-        # Replace this with your order-fulfillment logic. `event.data.session_id`
-        # and `event.data.transaction_id` are available here; pass them to your
-        # fulfillment system but avoid logging them verbatim.
-        pass
-    elif event.type == "charge.failed":
-        # Payment did not complete — do not fulfill.
-        pass
-    # Unknown event types — accept the webhook (ack 200) but take no action.
+    try:
+        data = event.data or {}
+        session_id = data.get("session_id")
+        order = ORDERS_BY_SESSION.get(session_id) if session_id else None
+        if event.type == "charge.succeeded":
+            if order is None:
+                # Not a checkout this app started (or it restarted and forgot).
+                # Acknowledge: a retry cannot make the order appear.
+                app.logger.warning("Webhook %s: no order for this session; nothing fulfilled.", event.type)
+            elif not _paid_as_priced(order, data.get("amount"), data.get("currency")):
+                # ⛔ A payment for another amount or currency is not this order
+                # as priced: hold it for a person. A field the event leaves out
+                # is not a mismatch.
+                order["status"] = "needs_review"
+                app.logger.error(
+                    "Order %s: paid %s %s, expected %s %s. Not fulfilled.",
+                    order["order_id"], data.get("amount"), data.get("currency"),
+                    order["amount"], order["currency"],
+                )
+            elif order["status"] != "paid":
+                order["status"] = "paid"
+                # Replace this with your order-fulfillment logic (mark the order
+                # row paid, ship, send the receipt). Pass
+                # ``data["transaction_id"]`` to your fulfillment system but
+                # avoid logging it verbatim.
+                app.logger.info("Order %s paid.", order["order_id"])
+        elif event.type == "charge.failed":
+            # Payment did not complete — do not fulfill. ⛔ A failure never
+            # undoes a payment: events arrive out of order, and a declined first
+            # attempt can land after the payment that went through.
+            if order is not None and order["status"] == "pending":
+                order["status"] = "failed"
+        # Unknown event types — accept the webhook (ack 200) but take no action.
+    except Exception as e:  # noqa: BLE001 — any handler failure must be retried
+        # OUR handler failed (a database write, say). 500 so the sender retries;
+        # the event is not recorded, so the retry runs the handler again.
+        app.logger.error("Webhook handler failed: %s", type(e).__name__)
+        return jsonify({"error": "handler_failed"}), 500
 
+    # Record the event only now, after it was processed without throwing.
+    HANDLED_EVENT_IDS.add(event.id)
     return jsonify({"received": True})
+
+
+def _paid_as_priced(order: Dict[str, Any], amount: Any, currency: Any) -> bool:
+    """True when the reported payment matches the order's own amount and currency."""
+    if isinstance(amount, int) and amount != order["amount"]:
+        return False
+    if isinstance(currency, str) and currency.upper() != order["currency"]:
+        return False
+    return True
 
 
 # Shown when a return cannot be matched to an order this server created for
@@ -158,7 +230,8 @@ def success():
     # `confirm_return` below: `expected_session_id` refuses a return that names
     # any other session, and `expected_amount` + `expected_currency` refuse a
     # session paid for a different figure.
-    started_session_id = request.cookies.get(CHECKOUT_COOKIE, "")
+    checkout_ref = request.cookies.get(CHECKOUT_COOKIE, "")
+    started_session_id = SESSION_BY_CHECKOUT_REF.get(checkout_ref, "") if checkout_ref else ""
     order = ORDERS_BY_SESSION.get(started_session_id) if started_session_id else None
     if order is None:
         return NOT_MATCHED_PAGE, 400
@@ -273,6 +346,15 @@ def success():
         f"<h1>Payment {status}</h1>"
         f"<p>Order: {order_id}</p><p>Session: {session}</p>"
     )
+
+
+@app.after_request
+def no_referrer_on_return(response: Response) -> Response:
+    # The return URL carries the session id and the signed return query. Send
+    # no Referer from that page, so a link or an asset on it cannot pass them on.
+    if request.path == "/success":
+        response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 @app.get("/health")

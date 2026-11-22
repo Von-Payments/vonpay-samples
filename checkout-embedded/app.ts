@@ -46,6 +46,12 @@ export interface AppDeps {
    * caller's word.
    */
   trustProxy?: boolean | number | string;
+  /**
+   * The page's full Content-Security-Policy, built at start from vora.js's
+   * published list for the pinned version (see vora-csp.ts). Without it the
+   * server still forbids framing (`frame-ancestors 'none'`), and nothing else.
+   */
+  contentSecurityPolicy?: string;
 }
 
 // ───────────────────────────────────────────────────────────────────────
@@ -113,12 +119,32 @@ function canStartOver(checkout: CheckoutRecord): boolean {
   return checkout.intentId === undefined || checkout.lastChargeFailed === true;
 }
 
-export function createApp({ client, publishableKey, apiBase, trustProxy = false }: AppDeps): Express {
+export function createApp({
+  client,
+  publishableKey,
+  apiBase,
+  trustProxy = false,
+  contentSecurityPolicy = "frame-ancestors 'none'",
+}: AppDeps): Express {
   const app = express();
   app.set("trust proxy", trustProxy);
-  app.use(express.json());
+  // The script policy (built from vora.js's published list), which also
+  // forbids framing: a framed Pay button can be clicked by a buyer who cannot
+  // see it.
+  app.use((_req, res, next) => {
+    res.setHeader("Content-Security-Policy", contentSecurityPolicy);
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    next();
+  });
+  app.use(express.json({ limit: "8kb" }));
 
   const checkouts = new Map<string, CheckoutRecord>();
+  // ⚠ In memory, so a flood of new checkouts grows this map without limit. At
+  // the cap a NEW checkout is refused (503). An old one is never dropped to
+  // make room: it can hold a charge whose answer was lost, and dropping it
+  // would drop the lock that stops a second charge.
+  const MAX_CHECKOUTS = 10_000;
 
   function readCheckout(req: Request): CheckoutRecord | undefined {
     const header = req.headers.cookie ?? "";
@@ -164,6 +190,11 @@ export function createApp({ client, publishableKey, apiBase, trustProxy = false 
     const open = readCheckout(req);
     if (open !== undefined && !canStartOver(open)) {
       res.status(200).json({ session_id: open.sessionId });
+      return;
+    }
+
+    if (checkouts.size >= MAX_CHECKOUTS) {
+      res.status(503).json({ error: MESSAGES.tooManyCheckouts });
       return;
     }
 
@@ -334,6 +365,7 @@ export function createApp({ client, publishableKey, apiBase, trustProxy = false 
 
 const MESSAGES = {
   sessionNotCreated: "Could not start the checkout. Please try again later.",
+  tooManyCheckouts: "Too many open checkouts. Please try again later.",
   previousChargeUnread: "Could not check this checkout's earlier payment. Nothing new was charged. Please try again.",
   chargeRefused: "The payment was not accepted, and the card was not charged. Try again or use another card.",
   chargeUnknown: "We could not confirm whether the card was charged. Please do not pay again.",
@@ -354,6 +386,8 @@ function logUpstreamError(op: string, err: unknown): void {
       message: err.message,
     });
   } else {
-    console.error(`[${op}] error`, err);
+    // The message only: a raw error object can carry request details (headers,
+    // a key) that do not belong in your logs.
+    console.error(`[${op}] error`, err instanceof Error ? err.message : String(err));
   }
 }

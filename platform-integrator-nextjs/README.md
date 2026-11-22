@@ -16,11 +16,12 @@ The patterns that aren't obvious from the single-merchant samples:
 | Tenant-scoped session creation with `Idempotency-Key` | `app/api/charge/route.ts` |
 | Tenant-scoped `Von-Pay-Version` header | `app/api/charge/route.ts` (via SDK config) |
 | Tenant-scoped confirmation via each tenant's own API key | `app/tenants/[merchantId]/confirm/page.tsx` |
-| **Multi-tenant webhook routing** - single endpoint, route by `merchantId` | `app/api/webhooks/route.ts` |
+| **Multi-tenant webhook routing** - single endpoint, route by `merchant_id` | `app/api/webhooks/route.ts` |
 | Per-tenant webhook signature verification with the tenant's `whsec_*` | `app/api/webhooks/route.ts` |
 | In-memory event idempotency dedup | `app/api/webhooks/route.ts` (replace with Redis in production) |
 | A webhook only touches the verified tenant's own orders | `app/api/webhooks/route.ts` → `orderOfTenant` |
 | Sign-in for the platform pages and `/api/charge` (`ADMIN_TOKEN`) | `proxy.ts` |
+| Content Security Policy with a per-request nonce, and the fixed security headers | `proxy.ts` + `lib/csp.ts`, `next.config.ts` |
 | CRM-style platform UI: tenants → customers → charge | `app/page.tsx` + `app/tenants/[merchantId]/page.tsx` |
 
 ## How the multi-tenant model works
@@ -31,7 +32,7 @@ There is no special "platform account" credential format in Von Payments today. 
 2. **Each merchant registers a webhook endpoint** in their dashboard and gets a per-endpoint `whsec_*` signing secret (shown once at create time).
 3. **Your platform stores both** in your DB, keyed by your internal merchant/tenant ID. Encrypt at rest.
 4. **At charge time:** look up the tenant's `vp_sk`, instantiate the SDK with that key, create the session.
-5. **At webhook time:** the inbound payload includes `merchantId`. Use it to route the event back to the right tenant, then verify the signature with that tenant's `whsec_*`.
+5. **At webhook time:** the inbound payload includes `merchant_id`. Use it to route the event back to the right tenant, then verify the signature with that tenant's `whsec_*`.
 
 This sample simulates 3 tenants via env vars (`TENANT_A_VP_SK` / `TENANT_A_WHSEC`, and so on). Replace the env-var lookup in `lib/tenants.ts` with a real DB query in production.
 
@@ -103,7 +104,7 @@ const idempotencyKey = `${tenantId}:${orderId}`;
 const session = await vonpay.sessions.create(params, { idempotencyKey });
 ```
 
-A double-click, a network blip or a middleware retry can land the same charge POST twice. Both carry the same `orderId`, so the server returns the one session it already created instead of making a second. **Send a key on every connector POST.** The SDK forwards it as the `Idempotency-Key` header.
+A double-click, a network blip or a middleware retry can land the same charge POST twice. Both carry the same `orderId`, so the server returns the one session it already created instead of making a second. **Send a key on every connector POST.** The SDK forwards it as the `Idempotency-Key` header. Because the order id comes from the form, the route keeps the FIRST order record for a session and refuses (`409 order_id_reused`) the same order id sent for a different customer, so a reused id can never re-point a session at another customer's amount.
 
 Key it on the order, not on what the order looks like: two genuine purchases by the same customer, for the same amount, in the same minute are still two orders with two ids, and never merge into one session. Do not mint the id in the charge route either - a fresh id per request makes every retry a new session.
 
@@ -113,16 +114,17 @@ This sample has no order table, so the tenant page mints the id when it renders 
 
 ```typescript
 // app/api/webhooks/route.ts
-const rawBody = await req.text();                  // 1. raw body for HMAC
+const rawBody = await readCappedBody(req);         // 1. raw body for HMAC, capped at 1 MB (413 above)
 const signature = req.headers.get("x-vonpay-signature");
-const peek = JSON.parse(rawBody);                  // 2. peek at merchantId (no side effects)
-const tenant = findTenantByVonPayMerchantId(peek.merchantId);
+const peek = JSON.parse(rawBody);                  // 2. peek at merchant_id (no side effects)
+const tenant = findTenantByVonPayMerchantId(peek.merchant_id);
 const { webhookSecret } = getTenantCredentials(tenant.id);  // 3. fetch tenant's whsec_*
 const event = vonpay.webhooks.constructEvent(rawBody, signature, webhookSecret);  // 4. VERIFY
+if (event.merchant_id !== peek.merchant_id) return 400;     // the verified event names this tenant
 // 5. ...now we trust the data. Update DB, fire downstream effects.
 ```
 
-The signature is verified using the **tenant's** per-endpoint `whsec_*` secret (not the API key, not a platform-wide secret), so we need to know who the tenant is *before* verification. The 2-step "peek then verify" pattern is safe because JSON-parsing a string has no side effects - we only act on the data after step 4 succeeds.
+The signature is verified using the **tenant's** per-endpoint `whsec_*` secret (not the API key, not a platform-wide secret), so we need to know who the tenant is *before* verification. The 2-step "peek then verify" pattern is safe because JSON-parsing a string has no side effects - we only act on the data after step 4 succeeds. The body is capped at 1 MB before it is read, so an unsigned request cannot make the route buffer or parse more. If you would rather not parse an unverified body at all, give each tenant its own endpoint URL (`/api/webhooks/<tenant>`) and pick the secret from the path.
 
 `constructEvent` takes **three** arguments - `(rawBody, signatureHeader, whsec)`. The signed timestamp lives inside the `x-vonpay-signature` header (`t=<unix>,v1=<hex>`); there is no separate timestamp header.
 
@@ -135,7 +137,7 @@ const order = orderOfTenant(tenant.id, event.data.session_id);
 if (!order) break; // not an order this tenant created here: change nothing, still ack
 ```
 
-A valid signature proves which **tenant** sent the event, not which order it may change. Each tenant registers its own endpoint and can read its own `whsec_*`, so a tenant (or anyone who obtains one tenant's secret) can sign an event that names another tenant's session id - and session ids are not secret, they travel in checkout and return URLs. So the handler looks the order up in your own records and acts only when `order.tenantId === tenant.id`, the same rule the confirm page applies. Anything else is acknowledged and ignored.
+A valid signature proves which **tenant** sent the event, not which order it may change. Each tenant registers its own endpoint and can read its own `whsec_*`, so a tenant (or anyone who obtains one tenant's secret) can sign an event that names another tenant's session id - and session ids are not secret, they travel in checkout and return URLs. So the handler looks the order up in your own records and acts only when `order.tenantId === tenant.id`, the same rule the confirm page applies. Anything else is acknowledged and ignored. A `charge.succeeded` for a different amount or currency than the order is held for review, not marked paid.
 
 ### Idempotent event processing
 
@@ -160,7 +162,7 @@ A tenant whose `whsec_*` is missing, still the `.env.example` value, or refused 
 
 ## What this sample doesn't cover
 
-- **Real sign-in** - `proxy.ts` puts the tenant list, the tenant pages and `/api/charge` behind HTTP Basic auth with one shared `ADMIN_TOKEN` (any user name; use a long random value, e.g. `openssl rand -hex 32`). In production (`NODE_ENV=production`) those routes answer `403` until `ADMIN_TOKEN` is set, so a missing setting never leaves them open; under `npm run dev` with no `ADMIN_TOKEN` they stay open for local testing. The buyer's return page and `/api/webhooks` stay open; every other path needs the password, including any page or route you add later (to open a new buyer-facing path, add it to the exception list in `proxy.ts`). A form post must also come from this site's own pages, so another web site cannot use a signed-in browser to start checkouts. Replace it with your platform's own sign-in before deploying, and check that the signed-in user may act for the tenant in the request.
+- **Real sign-in** - `proxy.ts` puts the tenant list, the tenant pages and `/api/charge` behind HTTP Basic auth with one shared `ADMIN_TOKEN` (any user name; use a long random value, e.g. `openssl rand -hex 32`). In production (`NODE_ENV=production`) those routes answer `403` until `ADMIN_TOKEN` is set, so a missing setting never leaves them open; under `npm run dev` with no `ADMIN_TOKEN` they stay open for local testing. The buyer's return page and `/api/webhooks` stay open; every other path needs the password, including any page or route you add later (to open a new buyer-facing path, add it to `BUYER_PATH` in `proxy.ts`). A form post must also come from this site's own pages, so another web site cannot use a signed-in browser to start checkouts. Replace it with your platform's own sign-in before deploying, and check that the signed-in user may act for the tenant in the request.
 - **Per-tenant rate limiting** - your platform should rate-limit charge POSTs per tenant to prevent abuse; not shown here.
 - **Outbound webhooks to your merchants** - your platform may want to forward `charge.succeeded` events to the merchant's own webhook URL (their internal CRM, fulfillment system). Not in scope of this sample. (Not `session.succeeded`: the server emits `session.*` internally, but those keys are not in the merchant subscription catalog, so an endpoint subscribed to one receives nothing, forever.)
 - **Captures, voids, and refunds** - the SDK exposes `paymentIntents.capture`, `paymentIntents.void`, and `refunds.create` natively. A platform would call these with the tenant's `vp_sk`, the same way `/api/charge` does for sessions.

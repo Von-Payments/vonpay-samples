@@ -17,9 +17,11 @@ A one-page funnel checkout on Vora Elements, the way direct-response offer store
 
 ```bash
 npm install
-cp .env.example .env    # set VONPAY_SECRET_KEY and VONPAY_PUBLISHABLE_KEY (test keys)
+cp .env.example .env    # set VON_PAY_SECRET_KEY and VON_PAY_PUBLISHABLE_KEY (test keys)
 npm run dev             # http://localhost:4242
 ```
+
+The settings use the `VON_PAY_` prefix, like every other sample. An older copy of this sample used `VONPAY_SECRET_KEY`, `VONPAY_PUBLISHABLE_KEY`, `VONPAY_API_BASE`, `VONPAY_RETURN_URL` and `VONPAY_TRUST_PROXY`: rename them to `VON_PAY_SECRET_KEY`, `VON_PAY_PUBLISHABLE_KEY`, `VON_PAY_BASE_URL`, `VON_PAY_RETURN_URL` and `VON_PAY_TRUST_PROXY`. The server stops at start and names any old setting it finds. `VON_PAY_BASE_URL` (optional) must be `https://checkout.vonpay.com`, `https://checkout-staging.vonpay.com`, or `localhost` on a test key: the page's card form is pointed at it too.
 
 Sandbox test card: `5200 0000 0000 1203`, expiry `03/30`, CVC `100`. Your sandbox account may ask for a 3-D Secure check on both charges; the sample handles it (the bank sends the shopper back, and the page asks the server for the result).
 
@@ -36,7 +38,7 @@ Sandbox test card: `5200 0000 0000 1203`, expiry `03/30`, CVC `100`. Your sandbo
 
 The routes are in [`server/app.ts`](server/app.ts); the page is [`public/index.html`](public/index.html) + [`public/funnel.js`](public/funnel.js).
 
-**vora.js version.** The page loads one pinned build, `https://js.vonpay.com/v1.53.0/vora.js`, with its Subresource Integrity hash. To move to a newer build, change the version and the `integrity` value together, taking the hash from `https://js.vonpay.com/integrity.json` (`versions["v1.X.Y"].sha384`). The page's own wording as agreement needs vora.js 1.43.0 or later.
+**vora.js version.** The page loads one pinned build, `https://js.vonpay.com/v1.54.1/vora.js`, with its Subresource Integrity hash. To move to a newer build, change the version and the `integrity` value together, taking the hash from `https://js.vonpay.com/integrity.json` (`versions["v1.X.Y"].sha384`). The page's own wording as agreement needs vora.js 1.43.0 or later.
 
 ## How the shopper agrees to keep the card on file
 
@@ -78,10 +80,11 @@ This sample does not defend against that. You can add, on your own funnel:
 
 - **An offer window:** accept the add-on only for a short time after the main order is paid, and only once per offer.
 - **Server-side click evidence:** record when the add-on request arrived, the shopper's IP address and user agent, next to the order. Keep it with the consent record.
-- **A script Content Security Policy** (`script-src` limited to your own origin and `https://js.vonpay.com`): see the [OWASP Content Security Policy Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html).
 - **Fewer third-party tags on payment pages**, each one listed and reviewed. PCI DSS 4.0 asks merchants to authorise and keep an inventory of every script on a payment page (requirement 6.4.3) and to detect changes to it (requirement 11.6.1).
 
 The sample does stop other sites from framing the page (`frame-ancestors 'none'`, `X-Frame-Options: DENY`), so a hidden frame cannot trick a shopper into pressing the button. That is a separate risk from scripts on your own page.
+
+**Content Security Policy, built at start.** Every vora.js version publishes the sources it needs at `https://js.vonpay.com/v<version>/csp.json`, with one list for test keys and one for live keys. At start, the server reads the version `public/index.html` pins, fetches that file, picks the list for the key's mode, and adds the page's own needs (`'self'`, no plugins, no framing by other sites). The result goes on every response from `server/app.ts` (`vora-csp.ts`). When you re-pin vora.js, restart: the policy follows the new version. If the file cannot be fetched, is for another version, or holds anything that is not a plain source, the server refuses to start and says why. A guessed policy would either break the card form or allow more than it should. Scripts are limited to this site and the sources in that list: no inline scripts. Background: the [OWASP Content Security Policy Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html).
 
 ### On a Next Commerce (29next) store
 
@@ -116,10 +119,10 @@ This sample is **not safe to deploy as it is**. At least:
 - Replace `DEFAULT_TERMS` with your real terms, and set `STORED_CREDENTIAL_USE` when they promise later charges.
 - Replace `persistConsentRecord` with a write to your database.
 - Rate-limit `/api/order`, `/api/charge` and `/api/add-on` (per shopper and per IP), and put bot / card-testing protection in front of them. `/api/order` creates a session with your secret key on every call, and the other two move money: card testers use all three.
-- Keep orders in your database, not in memory (the sample keeps at most 10,000 and drops the oldest).
+- Keep orders in your database, not in memory (the sample keeps at most 10,000 and refuses a new order at that cap, rather than drop an open one).
 - Fulfil from the `payment_intent.succeeded` webhook ([`webhooks-node`](../webhooks-node) shows how), never from the page reaching a screen. Send the shopper's confirmation from there too: this sample sends none.
 - Decide what you add against scripts calling the add-on ([above](#who-can-press-the-add-on-button)).
-- Use live keys, an `https://` `VONPAY_RETURN_URL`, and `NODE_ENV=production` (the order cookie is then always `Secure`). Behind a TLS-terminating proxy or load balancer you run, set `VONPAY_TRUST_PROXY` to its hop count (for example `1`), so the server sees the shopper's HTTPS. Never set it for a proxy you do not run: the forwarded headers are then the caller's word.
+- Use live keys, an `https://` `VON_PAY_RETURN_URL`, and `NODE_ENV=production` (the order cookie is then always `Secure`). Behind a TLS-terminating proxy or load balancer you run, set `VON_PAY_TRUST_PROXY` to its hop count (for example `1`), so the server sees the shopper's HTTPS. Never set it for a proxy you do not run: the forwarded headers are then the caller's word.
 
 ## Read more
 

@@ -17,11 +17,13 @@ You don't decide whether to challenge - the issuer does. When it wants to, `POST
 | Route | What happens |
 |---|---|
 | `POST /orders` | Start an order on the server (the page at `/` does this for you). Returns `{ orderId }` |
-| `POST /charge` | For an order this server created (`orderId`), create a manual-capture intent with a `vp_pmt_*` token. Branch on `status`: `requires_action` → redirect to the 3DS URL · `authorized` → capture immediately · `failed` → surface the decline. A second `POST /charge` on an order that holds or took money answers `409` |
+| `POST /charge` | For an order this server created (`orderId`), from the browser that started it, create a manual-capture intent with a `vp_pmt_*` token. Branch on `status`: `requires_action` → redirect to the 3DS URL · `authorized` → capture immediately · `failed` → surface the decline. A second `POST /charge` on an order that holds or took money answers `409` |
 | `GET /3ds/return` | Where the issuer returns the buyer after the challenge. Reads the payment from the API and captures it if the money is held. Does **not** fulfill |
 | `POST /webhooks` | Verify `x-vonpay-signature`, then act on `payment_intent.succeeded` / `payment_intent.failed` to confirm the post-challenge terminal state |
 
-`POST /orders` and `GET /` are demo-only stubs. They need no sign-in, and every call creates an order in an in-memory map that nothing ever removes (a restart forgets them all). In a real app the order is created for the signed-in buyer, from a cart priced on your server, and stored in your database.
+> ⚠️ **Unauthenticated demo. Run it on a test key, on your own machine.** There is no sign-in, so anyone who can reach this server can start an order and charge the saved card in `VON_PAY_PAYMENT_METHOD`. The page and the start-up log say so.
+
+`POST /orders` and `GET /` are demo-only stubs. They need no sign-in, and every call creates an order in an in-memory map that nothing ever removes (a restart forgets them all). At 10,000 orders a new one is refused (`503`) rather than drop one that may hold money. Each order is tied to the browser that started it (a random id in an httpOnly cookie), so someone who learns an order id (it is in the bank's return link) cannot pay it from another browser. In a real app the order is created for the signed-in buyer, from a cart priced on your server, and stored in your database, and the card comes from that buyer's own record.
 
 **Before deploying, rate-limit `/orders` and `/charge`** (per buyer and per IP) and put bot / card-testing protection in front of them. `/charge` moves money with your secret key on every call, which is exactly what card testers look for. This sample has neither.
 
@@ -105,6 +107,8 @@ The buyer's browser returning to `/3ds/return` tells you the challenge *finished
 - `payment_intent.authorized` → 3DS passed on a manual-capture payment. The money is held, not taken, so **this sample captures it here**, with the order's `{order}:capture` key. Do **not** fulfill yet: wait for `payment_intent.succeeded`.
 
 The return page captures a held payment too, with the same key, so together they make one capture.
+
+**Why the return page captures, and why that is safe.** The `payment_intent.authorized` webhook may not reach you (see below), and an unused hold lapses at the bank, so waiting only for the webhook can lose a sale the buyer already authorized. The return page captures only a payment the API reports as **held** (`authorized`) for an order this server created: it reads the status on your key and never trusts the link. It uses the order's **single capture key** (`{order}:capture`), the same one the webhook and `/charge` use, so a reload, a second tab and the webhook together make one capture. And it **never fulfils**: shipping waits for `payment_intent.succeeded`. Opening the link can at most capture money the buyer already agreed to pay for that order, which the webhook would capture anyway.
 
 **If that capture fails, the order is kept at `authorized`, so a second `/charge` still answers `409`:**
 

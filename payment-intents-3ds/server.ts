@@ -12,7 +12,8 @@
  * Flow demonstrated:
  *   POST /orders       Start an order (the page at / does this for you).
  *   POST /charge       Create a manual-capture intent against the saved card,
- *                      for that order. Branch on status:
+ *                      for that order, from the browser that started it.
+ *                      Branch on status:
  *                        requires_action → redirect the buyer to the 3DS URL
  *                        authorized      → no challenge; capture immediately
  *                        failed          → surface the decline
@@ -162,6 +163,12 @@ app.use(express.urlencoded({ extended: false }));
 // request would give every retry a new key, which protects nothing.
 interface Order {
   id: string;
+  /**
+   * The browser that started this order (a random id in an httpOnly cookie).
+   * /charge pays the order only for that browser. A real app binds the order
+   * to the signed-in buyer instead.
+   */
+  browserId: string;
   amount: number;
   currency: string;
   /** "open" until a charge comes back, then the payment's own status. */
@@ -178,11 +185,52 @@ interface Order {
 }
 type CaptureResult = PaymentIntent | "refused" | "retry_later" | "unknown";
 const orders = new Map<string, Order>();
+// ⚠ At the cap a NEW order is refused (503). An old one is never dropped to
+// make room: it can hold money, or a capture whose answer was lost.
+const MAX_ORDERS = 10_000;
+const hasRoomForOrder = (): boolean => orders.size < MAX_ORDERS;
 
-function createOrder(): Order {
-  const order: Order = { id: `ord_${randomUUID()}`, amount: AMOUNT_MINOR, currency: CURRENCY, status: "open" };
+function createOrder(browserId: string): Order {
+  const order: Order = {
+    id: `ord_${randomUUID()}`,
+    browserId,
+    amount: AMOUNT_MINOR,
+    currency: CURRENCY,
+    status: "open",
+  };
   orders.set(order.id, order);
   return order;
+}
+
+// ─── Which browser is this ──────────────────────────────────────────────
+// ⚠ UNAUTHENTICATED DEMO. This sample has no sign-in, so the closest it can
+// come to "this buyer's order" is "the browser that started this order". The
+// id in the cookie is random and lives only on this server, so a caller who
+// learns an order id (it is in the bank's return link) cannot pay that order
+// from another browser. It does NOT stop a caller from starting their own
+// order and charging the saved card in VON_PAY_PAYMENT_METHOD: anyone who can
+// reach this server can do that. Run it only on a test key, on your machine.
+const BROWSER_COOKIE = "pi3ds_browser";
+
+function readBrowserId(req: Request): string | undefined {
+  for (const part of (req.headers.cookie ?? "").split(";")) {
+    const [name, ...rest] = part.trim().split("=");
+    if (name !== BROWSER_COOKIE) continue;
+    const value = rest.join("=");
+    return /^[0-9a-f-]{36}$/.test(value) ? value : undefined;
+  }
+  return undefined;
+}
+
+// The browser's id, minting one (and setting its cookie) on first use.
+function browserIdFor(req: Request, res: Response): string {
+  const existing = readBrowserId(req);
+  if (existing !== undefined) return existing;
+  const id = randomUUID();
+  // httpOnly: page scripts cannot read it. sameSite "lax": a cross-site POST
+  // to /charge does not carry it. secure: when this request came over HTTPS.
+  res.cookie(BROWSER_COOKIE, id, { httpOnly: true, sameSite: "lax", secure: req.secure, path: "/" });
+  return id;
 }
 
 // Money is held or taken. A repeat /charge must not read like a new payment.
@@ -260,8 +308,12 @@ async function sendCapture(order: Order, intentId: string): Promise<CaptureResul
 }
 
 // POST /orders — start an order. Returns its id; pass it to /charge.
-app.post("/orders", (_req: Request, res: Response): void => {
-  res.status(201).json({ orderId: createOrder().id });
+app.post("/orders", (req: Request, res: Response): void => {
+  if (!hasRoomForOrder()) {
+    res.status(503).json({ error: "Too many open orders. Please try again later." });
+    return;
+  }
+  res.status(201).json({ orderId: createOrder(browserIdFor(req, res)).id });
 });
 
 // ─── Create + 3DS branch ─────────────────────────────────────────────────
@@ -299,8 +351,12 @@ app.post("/charge", async (req: Request, res: Response): Promise<void> => {
 
   // The order must be one THIS server created. Its stored amount and id are
   // what get charged and keyed; nothing else in the request is read.
+  // It must also be paid from the browser that started it (see BROWSER_COOKIE).
+  // An unknown order and another browser's order get the same answer, so the
+  // reply does not confirm that an order id exists.
   const requested: unknown = req.body?.orderId;
-  const order = typeof requested === "string" ? orders.get(requested) : undefined;
+  const found = typeof requested === "string" ? orders.get(requested) : undefined;
+  const order = found !== undefined && found.browserId === readBrowserId(req) ? found : undefined;
   if (!order) {
     res.status(400).json({
       error: "Unknown order. Start one with POST /orders (or load the page at /), then pay it.",
@@ -611,14 +667,23 @@ app.get("/health", async (_req, res) => {
   }
 });
 
-app.get("/", (_req, res) => {
+app.get("/", (req, res) => {
   // One order per page view. Submitting this form twice sends the same order
   // id, so it can only ever be charged once: the second submit gets the same
   // decline or bank redirect, or a 409 once the order holds money.
-  const order = createOrder();
+  if (!hasRoomForOrder()) {
+    res.status(503).type("text").send("Too many open orders. Please try again later.");
+    return;
+  }
+  const order = createOrder(browserIdFor(req, res));
   res.type("html").send(
     [
       "<h1>Von Payments — Payment Intents 3DS sample</h1>",
+      '<p style="background:#fee;border:1px solid #c00;padding:8px">',
+      "<strong>Unauthenticated demo. Test keys only, on your own machine.</strong>",
+      "There is no sign-in: anyone who can reach this server can charge the saved",
+      "card in VON_PAY_PAYMENT_METHOD. A real app charges the signed-in buyer's own",
+      "card, looked up on the server.</p>",
       "<p>Click pay to create a manual-capture intent with the saved card in",
       "VON_PAY_PAYMENT_METHOD. If the bank challenges, the server redirects",
       "you to the issuer challenge, then confirms the outcome from the webhook.</p>",
@@ -635,6 +700,9 @@ app.get("/", (_req, res) => {
 });
 
 app.listen(port, () => {
+  console.warn(
+    "⚠ Unauthenticated demo: anyone who can reach this server can charge the saved card in VON_PAY_PAYMENT_METHOD. Test keys only, on your own machine.",
+  );
   console.log({
     msg: "server_started",
     url: `http://localhost:${port}`,
