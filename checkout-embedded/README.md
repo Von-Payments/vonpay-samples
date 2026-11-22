@@ -19,7 +19,11 @@ without sending the buyer to a hosted checkout page.
 ## How it works
 
 ```
-server.ts            Reads env, creates the SDK client, starts the server.
+server.ts            Reads env, builds the Content Security Policy from
+                     vora.js's published list, creates the SDK client,
+                     starts the server.
+vora-csp.ts          Fetches https://js.vonpay.com/v<pinned>/csp.json and
+                     builds the policy; refuses on any failure.
 app.ts               The routes:
                        GET  /api/config          → publishable key + amount
                        POST /api/create-session  → mints a session (secret key)
@@ -197,6 +201,7 @@ new builds to your page without a change on your side, so it cannot carry an
 
 ## Security notes
 
+- **Content Security Policy, built at start.** Every vora.js version publishes the sources it needs at `https://js.vonpay.com/v<version>/csp.json`, with one list for test keys and one for live keys. At start, the server reads the version `public/index.html` pins, fetches that file, picks the list for the key's mode, and adds the page's own needs (`'self'`, no plugins, no framing by other sites). The result goes on every response from `app.ts` (`vora-csp.ts`). When you re-pin vora.js, restart: the policy follows the new version. If the file cannot be fetched, is for another version, or holds anything that is not a plain source, the server refuses to start and says why. A guessed policy would either break the card form or allow more than it should. Scripts are limited to this site and the sources in that list: no inline scripts.
 - **Two keys, two scopes.** The secret key (`vp_sk_*`) stays on the server
   and creates sessions / charges tokens. The publishable key (`vp_pk_*`) is
   safe in the browser - it can only authenticate VORA's public endpoints,

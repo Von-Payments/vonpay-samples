@@ -80,10 +80,11 @@ This sample does not defend against that. You can add, on your own funnel:
 
 - **An offer window:** accept the add-on only for a short time after the main order is paid, and only once per offer.
 - **Server-side click evidence:** record when the add-on request arrived, the shopper's IP address and user agent, next to the order. Keep it with the consent record.
-- **A script Content Security Policy** (`script-src` limited to your own origin and `https://js.vonpay.com`): see the [OWASP Content Security Policy Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html).
 - **Fewer third-party tags on payment pages**, each one listed and reviewed. PCI DSS 4.0 asks merchants to authorise and keep an inventory of every script on a payment page (requirement 6.4.3) and to detect changes to it (requirement 11.6.1).
 
 The sample does stop other sites from framing the page (`frame-ancestors 'none'`, `X-Frame-Options: DENY`), so a hidden frame cannot trick a shopper into pressing the button. That is a separate risk from scripts on your own page.
+
+**Content Security Policy, built at start.** Every vora.js version publishes the sources it needs at `https://js.vonpay.com/v<version>/csp.json`, with one list for test keys and one for live keys. At start, the server reads the version `public/index.html` pins, fetches that file, picks the list for the key's mode, and adds the page's own needs (`'self'`, no plugins, no framing by other sites). The result goes on every response from `server/app.ts` (`vora-csp.ts`). When you re-pin vora.js, restart: the policy follows the new version. If the file cannot be fetched, is for another version, or holds anything that is not a plain source, the server refuses to start and says why. A guessed policy would either break the card form or allow more than it should. Scripts are limited to this site and the sources in that list: no inline scripts. Background: the [OWASP Content Security Policy Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html).
 
 ### On a Next Commerce (29next) store
 

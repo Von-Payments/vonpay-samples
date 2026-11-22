@@ -158,6 +158,12 @@ export interface AppDeps {
   trustProxy?: boolean | number | string;
   /** Most orders kept in memory; at the cap a new order is refused (503). Default 10,000. */
   maxOrders?: number;
+  /**
+   * The page's full Content-Security-Policy, built at start from vora.js's
+   * published list for the pinned version (see vora-csp.ts). Without it the
+   * server still forbids framing (`frame-ancestors 'none'`), and nothing else.
+   */
+  contentSecurityPolicy?: string;
 }
 
 const NO_KEY_ERROR = "VON_PAY_SECRET_KEY is not configured. Set it in .env and restart.";
@@ -315,13 +321,15 @@ export function createApp({
   secureCookies = process.env.NODE_ENV === "production",
   trustProxy = false,
   maxOrders = 10_000,
+  contentSecurityPolicy = "frame-ancestors 'none'",
 }: AppDeps): Express {
   const app = express();
   app.set("trust proxy", trustProxy);
-  // Against clickjacking: no other site may frame this page (a framed order
-  // button can be clicked by a shopper who cannot see it). Not a script policy.
+  // The script policy (built from vora.js's published list), which also
+  // forbids framing: a framed order button can be clicked by a shopper who
+  // cannot see it.
   app.use((_req, res, next) => {
-    res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+    res.setHeader("Content-Security-Policy", contentSecurityPolicy);
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     next();

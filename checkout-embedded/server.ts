@@ -38,8 +38,11 @@
  *                             a TLS-terminating proxy you run sits in front
  */
 
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { VonPayCheckout } from "@vonpay/checkout-node";
 import { createApp } from "./app.js";
+import { keyModeOf, loadVoraCsp, pinnedVoraVersionOf } from "./vora-csp.js";
 
 const SECRET_KEY = process.env.VON_PAY_SECRET_KEY;
 const PUBLISHABLE_KEY = process.env.VON_PAY_PUBLISHABLE_KEY;
@@ -102,6 +105,25 @@ const TRUST_PROXY =
       ? Number(TRUST_PROXY_ENV)
       : TRUST_PROXY_ENV;
 
+// The page's Content Security Policy, from vora.js's published list for the
+// version public/index.html pins, test or live list by the key's mode. If it
+// cannot be read, refuse to start: see vora-csp.ts.
+let contentSecurityPolicy: string;
+try {
+  const page = path.join(path.dirname(fileURLToPath(import.meta.url)), "public", "index.html");
+  contentSecurityPolicy = await loadVoraCsp({
+    version: pinnedVoraVersionOf(page),
+    mode: keyModeOf(SECRET_KEY),
+    apiOrigin: API_BASE ? new URL(API_BASE).origin : undefined,
+  });
+} catch (err) {
+  console.error(
+    `Could not build the page's Content Security Policy: ${err instanceof Error ? err.message : String(err)}. ` +
+      "The server will not start without it. Check the network, and that public/index.html pins a published vora.js version.",
+  );
+  process.exit(1);
+}
+
 const vonpay = new VonPayCheckout(
   API_BASE ? { apiKey: SECRET_KEY, baseUrl: API_BASE } : SECRET_KEY,
 );
@@ -111,6 +133,7 @@ createApp({
   publishableKey: PUBLISHABLE_KEY,
   apiBase: API_BASE,
   trustProxy: TRUST_PROXY,
+  contentSecurityPolicy,
 }).listen(PORT, () => {
   console.log(`Embedded checkout sample running at http://localhost:${PORT}`);
 });

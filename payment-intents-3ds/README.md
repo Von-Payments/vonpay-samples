@@ -108,6 +108,8 @@ The buyer's browser returning to `/3ds/return` tells you the challenge *finished
 
 The return page captures a held payment too, with the same key, so together they make one capture.
 
+**Why the return page captures, and why that is safe.** The `payment_intent.authorized` webhook may not reach you (see below), and an unused hold lapses at the bank, so waiting only for the webhook can lose a sale the buyer already authorized. The return page captures only a payment the API reports as **held** (`authorized`) for an order this server created: it reads the status on your key and never trusts the link. It uses the order's **single capture key** (`{order}:capture`), the same one the webhook and `/charge` use, so a reload, a second tab and the webhook together make one capture. And it **never fulfils**: shipping waits for `payment_intent.succeeded`. Opening the link can at most capture money the buyer already agreed to pay for that order, which the webhook would capture anyway.
+
 **If that capture fails, the order is kept at `authorized`, so a second `/charge` still answers `409`:**
 
 | What happened | What the sample does |

@@ -46,6 +46,12 @@ export interface AppDeps {
    * caller's word.
    */
   trustProxy?: boolean | number | string;
+  /**
+   * The page's full Content-Security-Policy, built at start from vora.js's
+   * published list for the pinned version (see vora-csp.ts). Without it the
+   * server still forbids framing (`frame-ancestors 'none'`), and nothing else.
+   */
+  contentSecurityPolicy?: string;
 }
 
 // ───────────────────────────────────────────────────────────────────────
@@ -113,13 +119,20 @@ function canStartOver(checkout: CheckoutRecord): boolean {
   return checkout.intentId === undefined || checkout.lastChargeFailed === true;
 }
 
-export function createApp({ client, publishableKey, apiBase, trustProxy = false }: AppDeps): Express {
+export function createApp({
+  client,
+  publishableKey,
+  apiBase,
+  trustProxy = false,
+  contentSecurityPolicy = "frame-ancestors 'none'",
+}: AppDeps): Express {
   const app = express();
   app.set("trust proxy", trustProxy);
-  // Against clickjacking: no other site may frame this page (a framed Pay
-  // button can be clicked by a buyer who cannot see it). Not a script policy.
+  // The script policy (built from vora.js's published list), which also
+  // forbids framing: a framed Pay button can be clicked by a buyer who cannot
+  // see it.
   app.use((_req, res, next) => {
-    res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+    res.setHeader("Content-Security-Policy", contentSecurityPolicy);
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     next();
