@@ -22,7 +22,13 @@
 // Not covered: "current release" numbers, the freshness of the checked date,
 // and behaviour sentences (review rule docs/facts-must-trace-to-source).
 //
-// No dependencies; runs on the stock runner Node. Exit 1 on any problem.
+// `--list` prints the sample folders instead, as GitHub Actions outputs
+// (node=[...] and python=[...]); ci.yml builds its matrix from them, so this
+// file is the one place that decides what a sample is.
+//
+// This file is the single home for what the check covers; CLAUDE.md and
+// .claude/review-rules.md point here. No dependencies; runs on the stock
+// runner Node. Exit 1 on any problem.
 
 import { readFileSync, readdirSync, existsSync, lstatSync } from "node:fs";
 import { join } from "node:path";
@@ -51,6 +57,20 @@ const samples = readdirSync(ROOT)
 if (samples.length === 0) {
   console.error("::error::check-root-docs: found no sample folders; run from the repo root");
   process.exit(1);
+}
+
+if (process.argv.includes("--list")) {
+  // Folder names reach $GITHUB_OUTPUT and a job matrix: allow plain names only.
+  const bad = samples.filter((s) => !/^[a-z0-9][a-z0-9-]*$/.test(s));
+  if (bad.length) {
+    console.error(`::error::check-root-docs --list: sample folder names must be lowercase letters, digits and '-': ${bad.map(clean).join(", ")}`);
+    process.exit(1);
+  }
+  const node = samples.filter((s) => existsSync(join(ROOT, s, "package.json")));
+  const python = samples.filter((s) => !node.includes(s) && existsSync(join(ROOT, s, "requirements.txt")));
+  console.log(`node=${JSON.stringify(node)}`);
+  console.log(`python=${JSON.stringify(python)}`);
+  process.exit(0);
 }
 
 // One value per fact; record a problem if the samples disagree.

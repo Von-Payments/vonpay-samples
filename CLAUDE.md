@@ -22,14 +22,16 @@ only have access to this repo, open an issue.
 - Leak check (`.github/workflows/leak-check.yml`): ticket IDs and secret-key
   material only; on a hit it prints file:line, never the value (public log).
   The full-glossary leak scan runs from the SDK repository on a schedule, not
-  here - this repo carries no leak/drift rule files on purpose.
+  here - this repo carries no glossary rule files on purpose.
 - Root-guide check (`scripts/check-root-docs.mjs`, a step in the leak-check
-  job so docs-only PRs get it too): README.md, AGENTS.md and llms.txt must name
-  every sample folder and state the samples' `@vonpay/*` pins and locked
-  versions, the `vonpay-checkout` pin, the pinned vora.js version, and a
-  "checked <date>" line. Run it locally with `node scripts/check-root-docs.mjs`.
-  It checks presence, not meaning: method, event and behaviour claims are
-  still checked by hand (review rule `docs/facts-must-trace-to-source`).
+  job so docs-only PRs get it too): README.md, AGENTS.md and llms.txt must
+  match the sample folders and their pins. What it covers and what it does not
+  is stated once, in the script's header. Run it locally with
+  `node scripts/check-root-docs.mjs`. The same script (`--list`) gives CI its
+  list of samples, so a new sample folder is built without editing `ci.yml`.
+- Two drift checks, two subjects: the SDK repository's daily job compares the
+  sample folders here with its own `samples/`; `check-root-docs.mjs` compares
+  the root guides (owned here) with those folders.
 - No repo-root toolchain: there is no root `package.json`, so the gates above
   run per sample folder.
 - Renovate is disabled here (`renovate.json`): bumps land upstream.

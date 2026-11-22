@@ -23,25 +23,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # One list of samples, derived from the tree: a top-level folder with a
+  # package.json is a Node sample, one with a requirements.txt is a Python
+  # sample (scripts/check-root-docs.mjs --list). A new sample is built and
+  # type-checked without anyone editing this file.
+  list-samples:
+    name: List samples
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      node: ${{ steps.list.outputs.node }}
+      python: ${{ steps.list.outputs.python }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: list
+        run: node scripts/check-root-docs.mjs --list >> "$GITHUB_OUTPUT"
+
   node-samples:
     name: ${{ matrix.sample }} (Node)
+    needs: list-samples
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        sample:
-          - checkout-nextjs
-          - checkout-express
-          - checkout-paybylink-nextjs
-          - platform-integrator-nextjs
-          - payment-intents-node
-          - payment-intents-3ds
-          - saved-cards-mit
-          - funnel-one-click-node
-          - checkout-embedded
-          - webhooks-node
-          - agent-mcp
+        sample: ${{ fromJSON(needs.list-samples.outputs.node) }}
     defaults:
       run:
         working-directory: ./${{ matrix.sample }}
@@ -94,14 +102,13 @@ jobs:
 
   python-samples:
     name: ${{ matrix.sample }} (Python)
+    needs: list-samples
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        sample:
-          - checkout-flask
-          - payment-intents-python
+        sample: ${{ fromJSON(needs.list-samples.outputs.python) }}
     defaults:
       run:
         working-directory: ./${{ matrix.sample }}
