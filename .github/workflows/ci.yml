@@ -2,7 +2,8 @@ name: CI
 
 on:
   # Docs-only changes (the root guide files, any README) build nothing, so they
-  # skip the 12 sample builds. The leak check (leak-check.yml) still runs on them.
+  # skip the sample builds. leak-check.yml (leak check + root-guide check)
+  # still runs on them.
   push:
     branches: [main]
     paths-ignore: ["**.md", "llms.txt", "LICENSE"]
@@ -10,10 +11,22 @@ on:
     branches: [main]
     paths-ignore: ["**.md", "llms.txt", "LICENSE"]
 
+# Read-only token: these jobs only build. Least privilege per GitHub's
+# Actions hardening guidance.
+permissions:
+  contents: read
+
+# Builds only, nothing deploys: a newer push to the same branch cancels the
+# older run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   node-samples:
     name: ${{ matrix.sample }} (Node)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -34,6 +47,8 @@ jobs:
         working-directory: ./${{ matrix.sample }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -42,7 +57,9 @@ jobs:
           cache-dependency-path: ${{ matrix.sample }}/package-lock.json
 
       - name: Install
-        run: npm install --no-audit --no-fund
+        # npm ci installs exactly the committed lockfile (and fails if it is
+        # out of step with package.json), so CI builds what integrators get.
+        run: npm ci --no-audit --no-fund
 
       - name: Type check
         # Prefer the sample's own typecheck script; fall back to a bare
@@ -78,6 +95,7 @@ jobs:
   python-samples:
     name: ${{ matrix.sample }} (Python)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -89,6 +107,8 @@ jobs:
         working-directory: ./${{ matrix.sample }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:

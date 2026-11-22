@@ -11,6 +11,13 @@ name: Leak check (public-safe)
 # repo (Von-Payments/vonpay → .github/workflows/samples-leak-deep-scan.yml),
 # which clones this repo and scans it with the canonical rules without ever
 # exposing the glossary here.
+#
+# The same job also runs the root-guide check (scripts/check-root-docs.mjs).
+# It lives here, not in ci.yml, because ci.yml skips docs-only changes and
+# the root guides are exactly what those changes touch. One job, not two.
+#
+# Keep the trigger `pull_request`. Never `pull_request_target`: that would run
+# PR code with a privileged token.
 
 on:
   pull_request:
@@ -23,8 +30,11 @@ permissions:
 jobs:
   leak-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Scan for internal ticket IDs + secret material
         run: |
@@ -40,10 +50,26 @@ jobs:
             --exclude-dir=node_modules --exclude-dir=.git \
             --exclude-dir=.next --exclude-dir=dist --exclude-dir=build \
             --exclude='package-lock.json' --exclude='pnpm-lock.yaml' --exclude='yarn.lock' \
-            2>/dev/null || true)
+            2>/dev/null) && rc=0 || rc=$?
+          # grep: 0 = hits, 1 = none, 2+ = the scan itself failed. A failed
+          # scan must not read as clean. (The `&& ... || rc=$?` keeps the
+          # runner's default `bash -e` from stopping on "no hits".)
+          if [ "$rc" -gt 1 ]; then
+            echo "::error::Leak scan itself failed (grep exit $rc)"
+            exit 1
+          fi
           if [ -n "$HITS" ]; then
-            echo "::error::Leak check found internal ticket IDs or secret material in customer-facing files:"
-            echo "$HITS"
+            # Print file:line only. This log is public: echoing the matched
+            # text would publish a real secret a second time.
+            echo "::error::Leak check found internal ticket IDs or secret material in customer-facing files (file:line, value withheld):"
+            printf '%s\n' "$HITS" | cut -d: -f1,2
             exit 1
           fi
           echo "Leak check clean — no internal ticket IDs or secret material found."
+
+      - name: Root guides match the samples
+        if: ${{ !cancelled() }}
+        # README.md, AGENTS.md and llms.txt must name every sample folder and
+        # state the pins the samples use (CLAUDE.md "Facts the root docs must
+        # agree with"). Runs here, not in ci.yml, so docs-only PRs get it too.
+        run: node scripts/check-root-docs.mjs
