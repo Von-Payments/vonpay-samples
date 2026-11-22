@@ -10,9 +10,9 @@ import { getOrderBySession, type OrderRecord } from "@/lib/orders";
  * POST /api/webhooks — multi-tenant webhook receiver.
  *
  * The platform receives webhooks from Von Payments for ALL its tenants
- * at this single endpoint. Each event payload includes a `merchantId`
+ * at this single endpoint. Each event payload includes a `merchant_id`
  * field — the platform routes the event back to the right tenant by
- * looking up the merchantId in its DB.
+ * looking up the merchant_id in its DB.
  *
  * Signature model: each webhook endpoint is signed with the per-endpoint
  * `whsec_*` secret minted when that endpoint is registered in the
@@ -24,14 +24,17 @@ import { getOrderBySession, type OrderRecord } from "@/lib/orders";
  *
  * Solution:
  *   1. Parse the body as JSON without verifying (read-only)
- *   2. Extract merchantId from the parsed payload
+ *   2. Extract merchant_id from the parsed payload
  *   3. Look up the tenant + their `whsec_*` endpoint secret
  *   4. Verify the signature using that `whsec_*` against the RAW body
  *   5. If valid: process the event. If invalid: 400.
  *
  * The body parse in step 1 is a read; we don't act on the data until
  * step 4 confirms it's authentic. This is safe because parsing JSON
- * doesn't have side effects.
+ * doesn't have side effects, and the body is capped at 1 MB before it is
+ * read (MAX_WEBHOOK_BYTES), so an unsigned request cannot make this route
+ * buffer or parse more than that. A per-tenant URL
+ * (`/api/webhooks/<tenant>`) avoids the unverified parse altogether.
  *
  * The signed timestamp lives INSIDE the `x-vonpay-signature` header
  * (`t=<unix>,v1=<hex>`) — there is no separate timestamp header, and
@@ -98,18 +101,45 @@ function orderOfTenant(tenantId: string, sessionId: string | null | undefined): 
   return order && order.tenantId === tenantId ? order : undefined;
 }
 
+// A real delivery is a few kilobytes. Refuse anything larger BEFORE reading it.
+const MAX_WEBHOOK_BYTES = 1024 * 1024;
+
+/** The request body as text, or null when it is larger than MAX_WEBHOOK_BYTES. */
+async function readCappedBody(req: NextRequest): Promise<string | null> {
+  if (Number(req.headers.get("content-length") ?? 0) > MAX_WEBHOOK_BYTES) return null;
+  if (req.body === null) return "";
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_WEBHOOK_BYTES) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 export async function POST(req: NextRequest) {
   // Read raw body — required for HMAC verification. Capture this BEFORE
   // JSON parsing; re-serialized JSON will not match the signature.
-  const rawBody = await req.text();
+  const rawBody = await readCappedBody(req);
+  if (rawBody === null) {
+    return NextResponse.json({ error: "body_too_large" }, { status: 413 });
+  }
   const signature = req.headers.get("x-vonpay-signature") ?? "";
 
-  // Step 1+2: peek at the payload to find merchantId. We're NOT
-  // trusting the data yet — just routing.
+  // Step 1+2: peek at the payload to find merchant_id. We're NOT
+  // trusting the data yet — just routing. Read only the envelope's own
+  // `merchant_id`, the field the verified event is checked against below.
   let peekedMerchantId: string;
   try {
     const peek = JSON.parse(rawBody);
-    peekedMerchantId = String(peek.merchantId ?? peek.merchant_id ?? "");
+    peekedMerchantId = typeof peek?.merchant_id === "string" ? peek.merchant_id : "";
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
@@ -170,6 +200,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid_signature" }, { status: 400 });
   }
 
+  // ⛔ The verified event must name the tenant whose secret verified it. The
+  // route chose that secret from the unverified body, so check the verified
+  // field too, not only the peek.
+  if (event.merchant_id !== peekedMerchantId || findTenantByVonPayMerchantId(event.merchant_id)?.id !== tenant.id) {
+    console.error(`Webhook for tenant ${tenant.id} names another merchant; refused.`);
+    return NextResponse.json({ error: "merchant_mismatch" }, { status: 400 });
+  }
+
   // A "Send test event" delivery is signed and can carry a real order's ids: acknowledge it and do nothing else.
   if (event.test_event === true) {
     return NextResponse.json({ received: true });
@@ -217,6 +255,17 @@ export async function POST(req: NextRequest) {
         // Not an order this tenant created here: do not touch anything. Still
         // ack (200), since a redelivery cannot change the answer.
         console.warn(`[${tenant.name}] ${event.type} for no order of this tenant — ignored`);
+        break;
+      }
+      // ⛔ Check what was paid against the order before fulfilling. A payment
+      // for another amount or currency is not this order as priced: hold it
+      // for a person. A field the event leaves out is not a mismatch.
+      const { amount, currency } = event.data;
+      if (
+        (typeof amount === "number" && amount !== order.amount) ||
+        (typeof currency === "string" && currency.toUpperCase() !== order.currency.toUpperCase())
+      ) {
+        console.error(`[${tenant.name}] order ${order.orderId} paid ${amount} ${currency}, expected ${order.amount} ${order.currency}: held for review`);
         break;
       }
       // Update your CRM's `orders` row → status=paid and trigger any

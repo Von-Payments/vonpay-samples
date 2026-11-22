@@ -1,3 +1,4 @@
+import { connection } from "next/server";
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -23,7 +24,10 @@ const layoutCss = `
   .badge { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 11px; font-weight: 600; background: #f0f0f3; color: #4a4a4f; }
 `;
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Render every page per request, so Next.js can put this request's
+  // Content-Security-Policy nonce on its scripts (see lib/csp.ts).
+  await connection();
   return (
     <html lang="en">
       <head>

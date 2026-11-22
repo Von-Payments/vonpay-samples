@@ -37,6 +37,7 @@ import { createHash, randomUUID } from "node:crypto";
 import express, { type Express, type Request, type Response } from "express";
 import {
   VonPayError,
+  minorUnitDigits,
   type MITReason,
   type PaymentIntent,
   type PaymentIntentRead,
@@ -51,12 +52,20 @@ export const ADD_ON_OFFER = { id: "refill-pack", name: "Refill pack", amountMino
 export const CURRENCY = "USD";
 
 /**
- * Minor units to a display price. ⚠ USD (two decimals) only: a zero-decimal
- * currency (JPY, KRW) or a three-decimal one (KWD) needs that currency's own
- * exponent, not `/ 100`.
+ * Minor units to a display price. The decimals come from the SDK's
+ * `minorUnitDigits` (the API's own table: JPY has 0, KWD has 3), never from a
+ * fixed `/ 100` or from Intl, whose data disagrees with the API for some
+ * currencies. Only the symbol comes from Intl.
  */
-export function formatPrice(minor: number): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: CURRENCY }).format(minor / 100);
+export function formatPrice(minor: number, currency: string = CURRENCY): string {
+  const digits = minorUnitDigits(currency);
+  if (digits === undefined) return `${minor} ${currency} (minor units)`;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(minor / 10 ** digits);
 }
 
 /**
@@ -113,7 +122,7 @@ export interface ConsentRecord {
 export type CheckoutClient = Pick<VonPayCheckout, "paymentIntents" | "sessions" | "paymentMethods">;
 
 export interface AppDeps {
-  /** The SDK client, or null when VONPAY_SECRET_KEY is not set. */
+  /** The SDK client, or null when VON_PAY_SECRET_KEY is not set. */
   client: CheckoutClient | null;
   /** Where the bank's 3-D Secure page sends the shopper back. */
   returnUrl: string;
@@ -147,11 +156,11 @@ export interface AppDeps {
    * trust a proxy you do not run.
    */
   trustProxy?: boolean | number | string;
-  /** Most orders kept in memory; the oldest go first. Default 10,000. */
+  /** Most orders kept in memory; at the cap a new order is refused (503). Default 10,000. */
   maxOrders?: number;
 }
 
-const NO_KEY_ERROR = "VONPAY_SECRET_KEY is not configured. Set it in .env and restart.";
+const NO_KEY_ERROR = "VON_PAY_SECRET_KEY is not configured. Set it in .env and restart.";
 const COOKIE = "funnel_order";
 
 /** The default hook. ⛔ Replace it: a log line is not a consent record. */
@@ -421,7 +430,14 @@ export function createApp({
     // The add-on is offered only when the main payment is paid and the card is
     // saved for reuse. A card saved for no reuse cannot be charged a second time.
     return order.savedFor === "off_session" || order.savedFor === "on_session"
-      ? { id: ADD_ON_OFFER.id, name: ADD_ON_OFFER.name, amount_minor: ADD_ON_OFFER.amountMinor, currency: CURRENCY }
+      ? {
+          id: ADD_ON_OFFER.id,
+          name: ADD_ON_OFFER.name,
+          amount_minor: ADD_ON_OFFER.amountMinor,
+          currency: CURRENCY,
+          // Formatted here, with the API's own decimals (see formatPrice).
+          display_price: formatPrice(ADD_ON_OFFER.amountMinor),
+        }
       : null;
   }
 
@@ -447,6 +463,13 @@ export function createApp({
    */
   app.post("/api/order", async (req: Request, res: Response) => {
     if (client === null) return res.status(500).json({ error: NO_KEY_ERROR });
+    // ⛔ At the cap, refuse a NEW order. Never drop an old one to make room:
+    // an old order can hold a charge that is running or whose answer was lost,
+    // and dropping it would also drop the lock that stops a second charge on
+    // that card.
+    if (orders.size >= maxOrders) {
+      return res.status(503).json({ error: "Too many open orders. Please try again later." });
+    }
     const orderId = `ord_${randomUUID()}`;
     const buyerId = `cus_${randomUUID()}`;
     try {
@@ -462,12 +485,6 @@ export function createApp({
         metadata: { sample: "funnel-one-click", order_id: orderId, terms_version: termsId },
       });
       const cookieId = randomUUID();
-      // Capped: the oldest order goes first (a Map keeps insertion order).
-      while (orders.size >= maxOrders) {
-        const oldest = orders.keys().next().value;
-        if (oldest === undefined) break;
-        orders.delete(oldest);
-      }
       orders.set(cookieId, { orderId, buyerId, sessionId: session.id, termsShown: terms, main: {}, addOn: {} });
       // httpOnly: page scripts cannot read it. sameSite "lax": the bank's
       // redirect back (a cross-site top-level GET) carries it; a cross-site
@@ -478,7 +495,12 @@ export function createApp({
         session_id: session.id,
         terms,
         terms_version: termsId,
-        offer: { name: MAIN_OFFER.name, amount_minor: MAIN_OFFER.amountMinor, currency: CURRENCY },
+        offer: {
+          name: MAIN_OFFER.name,
+          amount_minor: MAIN_OFFER.amountMinor,
+          currency: CURRENCY,
+          display_price: formatPrice(MAIN_OFFER.amountMinor),
+        },
       });
     } catch (err) {
       return sendError(res, "order/session create failed", err);

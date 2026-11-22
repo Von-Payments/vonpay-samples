@@ -1,20 +1,8 @@
 import type { NextConfig } from "next";
 
 const securityHeaders = [
-  {
-    key: "Content-Security-Policy",
-    value: [
-      "default-src 'self'",
-      "script-src 'self'",
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data:",
-      "connect-src 'self' https://api.vonpay.com https://checkout.vonpay.com",
-      "frame-src https://checkout.vonpay.com",
-      "frame-ancestors 'none'",
-      "base-uri 'self'",
-      "form-action 'self'",
-    ].join("; "),
-  },
+  // The Content-Security-Policy is set per request in proxy.ts, with a nonce
+  // (lib/csp.ts says why it cannot be a fixed header here).
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },

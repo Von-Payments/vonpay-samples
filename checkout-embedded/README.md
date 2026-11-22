@@ -9,9 +9,9 @@ without sending the buyer to a hosted checkout page.
   a static HTML/JS page (browser)
 - **Von Payments SDKs:**
   - Server: `@vonpay/checkout-node` 4.x (`^4.13.0`)
-  - Browser: the Embedded Fields SDK, loaded from
-    `https://js.vonpay.com/v1/vora.js` (CDN `<script>` - there is no public
-    npm package to install)
+  - Browser: the Embedded Fields SDK, loaded from the CDN, pinned to
+    `https://js.vonpay.com/v1.54.1/vora.js` with its Subresource Integrity
+    hash (CDN `<script>` - there is no public npm package to install)
 - **What it demonstrates:** create a session server-side, mount the card
   iframe in the browser, tokenize on submit, and handle all three submit
   outcomes (`token` / `charged` / `error`) correctly
@@ -128,6 +128,9 @@ payment provider, is refused with `422 sandbox_account_required`.
 ```bash
 cp .env.example .env
 # Edit .env: set VON_PAY_SECRET_KEY and VON_PAY_PUBLISHABLE_KEY
+# Optional VON_PAY_BASE_URL (renamed from VON_PAY_API_BASE): https://checkout.vonpay.com,
+# https://checkout-staging.vonpay.com, or localhost on a test key. The browser's
+# card form is pointed at it too, so the server refuses any other host.
 
 npm install
 npm run dev
@@ -166,24 +169,30 @@ payment and redirects the buyer to the bank: see the
 
 ## Pinning the SDK version
 
-`index.html` loads the auto-updating `/v1/` channel:
-
-```html
-<script src="https://js.vonpay.com/v1/vora.js" crossorigin="anonymous"></script>
-```
-
-For stricter supply-chain control, pin a specific version with
-browser-enforced Subresource Integrity. Copy the exact `integrity` hash for
-the version from [`js.vonpay.com/integrity.json`](https://js.vonpay.com/integrity.json)
-(the newest release is named under `channels.v1.current`), and replace
-`vX.Y.Z` below with that version:
+`index.html` loads one pinned version with browser-enforced Subresource
+Integrity, so the browser refuses the file if its bytes ever differ from the
+published hash:
 
 ```html
 <script
-  src="https://js.vonpay.com/vX.Y.Z/vora.js"
-  integrity="sha384-<hash-from-integrity.json>"
+  src="https://js.vonpay.com/v1.54.1/vora.js"
+  integrity="sha384-SZhMd+iYRArjDgHq08tAqKu5WZJ9V6cChe5udrnY3YQXyPlsfseQWqP8oKTaAjhP"
   crossorigin="anonymous"
 ></script>
+```
+
+To move to a newer version, change the version and the `integrity` value
+together. Take the hash from
+[`js.vonpay.com/integrity.json`](https://js.vonpay.com/integrity.json)
+(`versions["vX.Y.Z"].sha384`; the newest release is named under
+`channels.v1.current`).
+
+The auto-updating `/v1/` channel is a stated choice, not the default. It ships
+new builds to your page without a change on your side, so it cannot carry an
+`integrity` hash:
+
+```html
+<script src="https://js.vonpay.com/v1/vora.js" crossorigin="anonymous"></script>
 ```
 
 ## Security notes

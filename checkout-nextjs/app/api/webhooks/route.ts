@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { VonPayCheckout } from "@vonpay/checkout-node";
+import { eventAlreadyHandled, getOrderBySession, markEventHandled } from "@/lib/orders";
 
 const apiKey = process.env.VON_PAY_SECRET_KEY!;
 const vonpay = new VonPayCheckout(apiKey);
@@ -20,6 +21,31 @@ function webhookSecret(): string | null {
   return secret;
 }
 
+// A real delivery is a few kilobytes. Refuse anything larger BEFORE reading it
+// into memory: the signature cannot be checked until the whole body is read,
+// so without a cap anyone can make this route buffer as much as they send.
+const MAX_WEBHOOK_BYTES = 1024 * 1024;
+
+/** The request body as text, or null when it is larger than MAX_WEBHOOK_BYTES. */
+async function readCappedBody(req: NextRequest): Promise<string | null> {
+  if (Number(req.headers.get("content-length") ?? 0) > MAX_WEBHOOK_BYTES) return null;
+  if (req.body === null) return "";
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_WEBHOOK_BYTES) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 export async function POST(req: NextRequest) {
   const secret = webhookSecret();
   if (secret === null) {
@@ -32,7 +58,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "webhook_secret_not_configured" }, { status: 500 });
   }
 
-  const body = await req.text();
+  const body = await readCappedBody(req);
+  if (body === null) {
+    return NextResponse.json({ error: "Body too large" }, { status: 413 });
+  }
   // The signed timestamp lives inside the signature header (t=,v1=) — there
   // is no separate timestamp header.
   const signature = req.headers.get("x-vonpay-signature");
@@ -66,6 +95,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ received: true });
   }
 
+  // Dedupe on `event.id` (`vp_evt_*`), unique per outbound event. A
+  // redelivery (after a timeout or a 5xx, or a manual resend) carries the same
+  // id: acknowledge it with 200 and do nothing else.
+  if (eventAlreadyHandled(event.id)) {
+    return NextResponse.json({ received: true, deduped: true });
+  }
+
   // Branch on event type. `charge.succeeded` is the event that means the buyer
   // actually paid; do NOT fulfill orders on `charge.failed`. Session IDs
   // are deep-link tokens — keep them out of general application logs and only
@@ -76,21 +112,58 @@ export async function POST(req: NextRequest) {
   // unknown event key, stores nothing and returns success. An endpoint
   // subscribed to it receives nothing, forever, and no error is raised at any
   // layer. `charge.*` is the subscribable family.
-  switch (event.type) {
-    case "charge.succeeded":
-      // Replace this with your order-fulfillment logic. `event.data.session_id`
-      // and `event.data.transaction_id` are available here; pass them to your
-      // fulfillment system but avoid logging them verbatim. Dedupe on
-      // `event.id` so a redelivery cannot fulfill the same order twice.
-      break;
-    case "charge.failed":
-      // Payment did not complete — do not fulfill.
-      // `event.data.failure_reason` is the buyer-safe explanation.
-      break;
-    default:
-      // Unknown event type — accept the webhook (ack 200) but take no action.
-      break;
+  try {
+    switch (event.type) {
+      case "charge.succeeded": {
+        // Find YOUR order for this session. No order: not a checkout this
+        // server started (or it restarted and forgot). Acknowledge: a retry
+        // cannot make the order appear.
+        const order = event.data.session_id ? getOrderBySession(event.data.session_id) : undefined;
+        if (!order) {
+          console.warn(`Webhook ${event.type}: no order for this session; nothing fulfilled.`);
+          break;
+        }
+        // ⛔ Check what was paid against the order before fulfilling. A
+        // payment for another amount or currency is not this order as priced:
+        // hold it for a person. A field the event leaves out is not a mismatch.
+        const { amount, currency } = event.data;
+        const amountDiffers = typeof amount === "number" && amount !== order.amount;
+        const currencyDiffers = typeof currency === "string" && currency.toUpperCase() !== order.currency;
+        if (amountDiffers || currencyDiffers) {
+          order.status = "needs_review";
+          console.error(`Order ${order.orderId}: paid ${amount} ${currency}, expected ${order.amount} ${order.currency}. Not fulfilled.`);
+          break;
+        }
+        if (order.status !== "paid") {
+          order.status = "paid";
+          // Replace this with your order-fulfillment logic (mark the order row
+          // paid, ship, send the receipt). Pass `event.data.transaction_id` to
+          // your fulfillment system but avoid logging it verbatim.
+          console.log(`Order ${order.orderId} paid.`);
+        }
+        break;
+      }
+      case "charge.failed": {
+        // Payment did not complete — do not fulfill.
+        // `event.data.failure_reason` is the buyer-safe explanation.
+        // ⛔ A failure never undoes a payment: events arrive out of order, and
+        // a declined first attempt can land after the payment that went through.
+        const order = event.data.session_id ? getOrderBySession(event.data.session_id) : undefined;
+        if (order?.status === "pending") order.status = "failed";
+        break;
+      }
+      default:
+        // Unknown event type — accept the webhook (ack 200) but take no action.
+        break;
+    }
+  } catch (err) {
+    // OUR handler failed (a database write, say). 500 so the sender retries;
+    // the event is not recorded, so the retry runs the handler again.
+    console.error("Webhook handler failed:", err instanceof Error ? err.message : String(err));
+    return NextResponse.json({ error: "Handler failed" }, { status: 500 });
   }
 
+  // Record the event only now, after it was processed without throwing.
+  markEventHandled(event.id);
   return NextResponse.json({ received: true });
 }

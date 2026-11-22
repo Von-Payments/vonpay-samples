@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { VonPayCheckout } from "@vonpay/checkout-node";
 import { formatMinorAmount } from "@/lib/money";
-import { CHECKOUT_COOKIE, getOrderBySession } from "@/lib/orders";
+import { CHECKOUT_COOKIE, getOrderBySession, sessionForCheckoutRef } from "@/lib/orders";
 
 // Shown when a return cannot be matched to an order this server created for
 // this browser. Neutral on purpose: it is NOT "payment failed" (the buyer may
@@ -36,7 +36,8 @@ export default async function ConfirmPage({
   // `confirmReturn` below: `expectedSessionId` refuses a return that names any
   // other session, and `expectedAmount` + `expectedCurrency` refuse a session
   // paid for a different figure.
-  const sessionId = (await cookies()).get(CHECKOUT_COOKIE)?.value ?? "";
+  const checkoutRef = (await cookies()).get(CHECKOUT_COOKIE)?.value;
+  const sessionId = (checkoutRef && sessionForCheckoutRef(checkoutRef)) ?? "";
   const order = sessionId ? getOrderBySession(sessionId) : undefined;
   if (!order) {
     return <NotMatched />;

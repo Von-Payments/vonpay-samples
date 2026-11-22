@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { nextWithContentSecurityPolicy } from "./lib/csp";
 
 /**
  * Sign-in for the merchant's side of this sample: the dashboard pages and the
@@ -26,6 +27,27 @@ import { NextResponse, type NextRequest } from "next/server";
  * the signed-in person may see each link.
  */
 export function proxy(req: NextRequest): NextResponse {
+  const refused = isBuyerPath(req.nextUrl.pathname) ? undefined : signInRefusal(req);
+  if (refused !== undefined) return refused;
+  // Every page that gets through carries a Content Security Policy with a
+  // fresh nonce (lib/csp.ts says why it cannot be a fixed header).
+  return nextWithContentSecurityPolicy(req);
+}
+
+/**
+ * The buyer's paths: the return page (`/confirm`) and the webhook receiver
+ * (`/api/webhooks`, which checks its own signature). They need no sign-in.
+ * Every other path does, so a page or route you add later is closed until you
+ * decide otherwise; to open a new buyer-facing path, add it here.
+ */
+const BUYER_PATH = /^\/(?:confirm|api\/webhooks)(?:\/|$)/;
+
+function isBuyerPath(pathname: string): boolean {
+  return BUYER_PATH.test(pathname);
+}
+
+/** Why this request may not reach the merchant's side, as the response to send; undefined when it may. */
+function signInRefusal(req: NextRequest): NextResponse | undefined {
   const token = process.env.ADMIN_TOKEN?.trim();
   if (!token) {
     if (process.env.NODE_ENV === "production") {
@@ -34,7 +56,7 @@ export function proxy(req: NextRequest): NextResponse {
         { status: 403 },
       );
     }
-    return NextResponse.next();
+    return undefined;
   }
 
   if (!fromThisSite(req)) {
@@ -46,16 +68,15 @@ export function proxy(req: NextRequest): NextResponse {
       headers: { "WWW-Authenticate": 'Basic realm="Pay links", charset="UTF-8"' },
     });
   }
-  return NextResponse.next();
+  return undefined;
 }
 
 export const config = {
-  // Every path is signed in EXCEPT the buyer's: the return page, the webhook
-  // receiver, and Next.js's static files and image optimizer
-  // (`/_next/static/…`, `/_next/image`) and the favicon. A page or route you
-  // add later is therefore closed until you decide otherwise; to open a new
-  // buyer-facing path, add it to this exception list.
-  matcher: ["/((?!confirm(?:/|$)|api/webhooks(?:/|$)|_next/static/|_next/image$|favicon\\.ico$).*)"],
+  // Every path except Next.js's static files and image optimizer
+  // (`/_next/static/…`, `/_next/image`) and the favicon. The proxy decides
+  // inside which paths need a sign-in (BUYER_PATH); it runs on the buyer's
+  // paths too, to put the Content Security Policy on them.
+  matcher: ["/((?!_next/static/|_next/image$|favicon\\.ico$).*)"],
 };
 
 /**

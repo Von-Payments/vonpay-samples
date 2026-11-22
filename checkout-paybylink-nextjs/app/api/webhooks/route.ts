@@ -26,6 +26,31 @@ function webhookSecret(): string | null {
   return secret;
 }
 
+// A real delivery is a few kilobytes. Refuse anything larger BEFORE reading it
+// into memory: the signature cannot be checked until the whole body is read,
+// so without a cap anyone can make this route buffer as much as they send.
+const MAX_WEBHOOK_BYTES = 1024 * 1024;
+
+/** The request body as text, or null when it is larger than MAX_WEBHOOK_BYTES. */
+async function readCappedBody(req: NextRequest): Promise<string | null> {
+  if (Number(req.headers.get("content-length") ?? 0) > MAX_WEBHOOK_BYTES) return null;
+  if (req.body === null) return "";
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_WEBHOOK_BYTES) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 export async function POST(req: NextRequest) {
   const secret = webhookSecret();
   if (secret === null) {
@@ -38,7 +63,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "webhook_secret_not_configured" }, { status: 500 });
   }
 
-  const body = await req.text();
+  const body = await readCappedBody(req);
+  if (body === null) {
+    return NextResponse.json({ error: "Body too large" }, { status: 413 });
+  }
   // The signed timestamp lives inside the signature header (t=,v1=) — there
   // is no separate timestamp header.
   const signature = req.headers.get("x-vonpay-signature");
@@ -85,6 +113,7 @@ export async function POST(req: NextRequest) {
   let nextStatus: "paid" | "failed" | undefined;
   let transactionId: string | undefined;
   let sessionId: string | undefined;
+  let paid: { amount: number | null; currency: string | null } | undefined;
   // Every field on `event.data` is nullable — the processor does not always
   // report one. Coerce to `undefined` rather than storing a literal null.
   //
@@ -101,6 +130,9 @@ export async function POST(req: NextRequest) {
     // is only the fallback for an event with no `vp_tx_id`.
     transactionId = event.data.vp_tx_id ?? event.data.transaction_id ?? undefined;
     sessionId = event.data.session_id ?? undefined;
+    // What was paid. updateStatus compares it with the link's own amount and
+    // currency, and sends a mismatch to needs_review instead of `paid`.
+    paid = { amount: event.data.amount, currency: event.data.currency };
   } else if (event.type === "charge.failed") {
     nextStatus = "failed";
     sessionId = event.data.session_id ?? undefined;
@@ -113,7 +145,8 @@ export async function POST(req: NextRequest) {
     // A paid link stays paid, even if a failed attempt's event lands after it.
     // A second success with a different transaction id goes to needs_review
     // (see updateStatus in lib/storage.ts).
-    const updated = updateStatus(sessionId, nextStatus, transactionId);
+    // A payment for a different amount or currency goes to needs_review too.
+    const updated = updateStatus(sessionId, nextStatus, transactionId, paid);
     // Log only the merchant-side identifiers (link id + status). Vonpay
     // session IDs are deep-link tokens — keep them out of general logs.
     console.log(

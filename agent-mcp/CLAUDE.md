@@ -16,7 +16,7 @@ This project uses [Von Payments](https://vonpay.com) for hosted checkout, embedd
 - **Python:** `vonpay-checkout` 4.x (PyPI; check `pip index versions vonpay-checkout` for latest)
 - **Browser fields:** `https://js.vonpay.com/v1/vora.js` (auto-update) or `https://js.vonpay.com/vX.Y.Z/vora.js` (pinned - the newest version is named under `channels.v1.current` in `https://js.vonpay.com/integrity.json`)
 - **React wrapper:** `@vonpay/vora-react` - provider + hook for the browser fields (not yet published to npm)
-- **MCP server (for agents):** `@vonpay/checkout-mcp` 6.x - adds 28 tools to any MCP-compatible client (Claude Code, Cursor, Claude Desktop, Continue.dev, Windsurf, custom runtimes). Same surface as the SDK.
+- **MCP server (for agents):** `@vonpay/checkout-mcp` 6.x - adds 35 tools (checkout-mcp 6.10.0) to any MCP-compatible client (Claude Code, Cursor, Claude Desktop, Continue.dev, Windsurf, custom runtimes). `VONPAY_MCP_TOOLS=read` registers only the 14 that read. Same surface as the SDK.
 - **CLI:** `@vonpay/checkout-cli` (check `npm view @vonpay/checkout-cli version` for latest) - local dev, webhook tail, signature verify. `--json` everywhere; `doctor --for-llm` for agent self-diagnosis.
 
 ## SDK surface (Node + Python - same shape, snake-cased in Python)
@@ -41,13 +41,17 @@ This project uses [Von Payments](https://vonpay.com) for hosted checkout, embedd
 
 ## Error handling
 
-Every error has a typed `code`, a one-line `fix`, a `docs` URL, and a `nextAction` field. Read `VonPayError.nextAction` to branch:
+Every error has a typed `code`, a one-line `fix`, a `docs` URL, and a `nextAction` field. Read `VonPayError.nextAction` to branch. There are nine values (SDK 4.13); treat any value you do not know as `contact_support`, never as a reason to retry:
 
 - `fix_input` → change the request body and retry
 - `rotate_key` → ask the user for a new key; do not retry the same one
 - `wait_and_retry` → exponential backoff, retry once
 - `contact_support` → terminal; surface a support path to the user
 - `ignore` → terminal but expected (e.g. card declined); show the error UI, do not retry
+- `reconcile` → ⛔ the outcome is UNKNOWN: money may have moved. Do NOT retry. Re-read the payment (for a capture or void, the payment intent) and act on what it says
+- `check_configuration` → the call never reached the API as configured (base URL, proxy, network). A person checks the setup before anything is retried; do not change the request
+- `reload_payment_form` → the browser's card form was already used by a declined attempt; load a fresh form (the error's `retry` block says how) and submit again. Do not ask for a different card
+- `retry` → resend ONCE, right away, after getting the one thing the hint names (for example a fresh browser verification). A second refusal is final
 
 The SDK's `VonPayError.llmHint` is a 1-3 sentence diagnostic written for an agent to act on.
 
@@ -59,8 +63,9 @@ Available under the `vonpay_checkout_*` prefix:
 - `create_payment_intent`, `get_payment_intent`, `capture_payment_intent`, `void_payment_intent`
 - `create_refund`, `create_token`
 - `list_payment_intents`, `summarize_approvals` (read-only reporting)
-- `list_subscription_products`, `get_subscription_product_terms` (read-only)
-- `list_subscriptions`, `get_subscription`, `cancel_subscription`, `unschedule_subscription_cancel`, `pause_subscription`, `resume_subscription`, `skip_subscription_renewal`, `set_subscription_next_bill_date`, `set_subscription_interval`, `set_subscription_price`, `set_subscription_discount`, `remove_subscription_discount` (every change needs an `idempotencyKey` unless `dryRun: true`)
+- `list_subscription_products`, `get_subscription_product`, `get_subscription_product_terms` (read-only)
+- `create_subscription_product`, `update_subscription_product`, `change_subscription_product_price`, `archive_subscription_product`, `unarchive_subscription_product` (every write needs an `idempotencyKey`; there is no dry run)
+- `list_subscriptions`, `get_subscription`, `list_subscription_attempts` (read-only), `cancel_subscription`, `unschedule_subscription_cancel`, `pause_subscription`, `resume_subscription`, `skip_subscription_renewal`, `set_subscription_next_bill_date`, `set_subscription_interval`, `set_subscription_price`, `set_subscription_discount`, `remove_subscription_discount` (every change needs an `idempotencyKey` unless `dryRun: true`)
 - `health`, `list_test_cards`, `diagnose_error`
 
 `VONPAY_MCP_TOOLS=read` registers only the tools that read.

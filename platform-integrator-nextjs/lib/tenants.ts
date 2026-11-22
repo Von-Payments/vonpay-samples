@@ -85,7 +85,7 @@ export function getTenant(tenantId: string): Tenant | undefined {
 }
 
 /**
- * Reverse lookup: given a merchantId returned in a Von Payments webhook
+ * Reverse lookup: given the merchant_id in a Von Payments webhook
  * payload, find the tenant on the platform side that owns it. In
  * production, this is a DB lookup keyed by `merchant_id`. Here we map
  * tenant IDs 1:1 to merchants — your real platform may have a more

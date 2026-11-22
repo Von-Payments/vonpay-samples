@@ -434,16 +434,16 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
     // a failed first attempt into a permanent drop.
     markCompleted(dedupeKey);
   } catch (handlerErr) {
-    // The signature is already verified, so a bug in OUR handler must NOT
-    // trigger a retry — we would just hit the same bug again. Log + alert +
-    // acknowledge with 200. Real systems should fire a Sentry/Datadog alert
-    // here so on-call sees the failure even though we returned 200.
+    // The signature is verified, but WE failed to act on the event (a database
+    // write, a fulfilment call). Reply with a 500 so the sender retries on its
+    // schedule: most handler failures are transient, and a 200 here would
+    // drop a paid order with nothing left to retry it.
     //
-    // ⚠️ Note what is NOT done here: the event is deliberately left UNRECORDED,
-    // so a manual resend from the dashboard can genuinely retry it. Returning
-    // 200 stops the automatic retry loop (which would only re-hit the same
-    // bug); leaving the key unmarked keeps the human recovery path open. Those
-    // are two different decisions and this sample makes both on purpose.
+    // The event is deliberately left UNRECORDED (`markCompleted` did not run),
+    // so the retry (or a manual resend from the dashboard) runs the handler
+    // again. If the failure is a bug in this code, the retries fail the same
+    // way and stop at the end of the schedule; alert on the log line below
+    // (Sentry, Datadog) so on-call fixes it and resends the event.
     console.error({
       level: "error",
       route: "/webhooks/vonpay",
@@ -451,6 +451,8 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
       dedupeKey,
       error: handlerErr instanceof Error ? handlerErr.message : String(handlerErr),
     });
+    res.status(500).json({ error: "Handler failed" });
+    return;
   }
 
   res.status(200).json({ received: true });

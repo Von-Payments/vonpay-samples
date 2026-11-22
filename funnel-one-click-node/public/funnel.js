@@ -4,10 +4,6 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-// ⚠ Two-decimal currencies (USD) only: a zero-decimal currency (JPY, KRW) or a
-// three-decimal one (KWD) needs that currency's own exponent, not `/ 100`.
-const money = (minor, currency) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency }).format(minor / 100);
 
 /** The page's own words for a decline: the API's wording is never shown raw. */
 const DECLINE_TEXT = {
@@ -68,7 +64,7 @@ function unknownOutcome() {
 }
 
 function offerAddOn(offer) {
-  $("add-on-text").textContent = `Add ${offer.name} for ${money(offer.amount_minor, offer.currency)}, charged to the card you just used. One click, nothing to type.`;
+  $("add-on-text").textContent = `Add ${offer.name} for ${offer.display_price}, charged to the card you just used. One click, nothing to type.`;
   show("add-on-step");
 }
 
@@ -103,7 +99,9 @@ function afterAddOn(r) {
 async function startOrder() {
   const order = await api("/api/order", {});
   $("offer-name").textContent = order.offer.name;
-  $("offer-price").textContent = money(order.offer.amount_minor, order.offer.currency);
+  // The server formats the price with the API's own decimals for the currency
+  // (JPY has 0, KWD has 3): the page never divides by 100 itself.
+  $("offer-price").textContent = order.offer.display_price;
   // The server's words, shown in full next to the button.
   $("terms").textContent = order.terms;
 
