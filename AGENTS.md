@@ -7,20 +7,20 @@ pick a starting sample.
 
 Read this alongside [`llms.txt`](./llms.txt). Keep everything factual - no
 invented endpoints, events, or fields. Every claim below was checked against the
-samples' code and the published SDK type definitions on **2026-11-04**; when in
+samples' code and the published SDK type definitions on **2026-11-22**; when in
 doubt, the sample's own `package.json` / `requirements.txt` and the installed
 SDK's `.d.ts` files win over this page.
 
-## SDK release lines (checked 2026-11-04)
+## SDK release lines (checked 2026-11-22)
 
 | Package | Samples pin | Current release | Where |
 |---|---|---|---|
-| `@vonpay/checkout-node` | `^4.7.0` (lockfiles at `4.7.0`) | `4.7.0` | npm - Node / TypeScript server SDK |
-| `vonpay-checkout` | `>=4.7,<5` | `4.7.0` | PyPI - Python server SDK |
-| `@vonpay/checkout-mcp` | `^6.5.0` (lockfile at `6.5.0`) | `6.5.0` | npm - MCP server (`agent-mcp` sample; 28 tools, including payment reports and subscription changes; `VONPAY_MCP_TOOLS=read` registers only the tools that read; on a live key every money action and subscription change waits for a person's approval in the MCP host's prompt) |
-| `@vonpay/checkout-cli` | not pinned by any sample | `0.18.0` | npm - CLI |
+| `@vonpay/checkout-node` | `^4.13.0` (lockfiles `4.13.0`) | `4.13.0` | npm - Node / TypeScript server SDK |
+| `vonpay-checkout` | `>=4.7,<5` | `4.13.0` | PyPI - Python server SDK (Python 3.9+) |
+| `@vonpay/checkout-mcp` | `^6.10.0` (lockfile `6.10.0`) | `6.10.0` | npm - MCP server (`agent-mcp` sample; the pinned `6.10.0` registers 35 tools, including payment reports, subscription changes, subscription products and a subscription's payment tries; `VONPAY_MCP_TOOLS=read` registers only the tools that read; on a live key every money action and subscription change waits for a person's approval in the MCP host's prompt) |
+| `@vonpay/checkout-cli` | not pinned by any sample | `0.23.0` | npm - CLI |
 | `@vonpay/test-cards` | not pinned by any sample | `0.2.1` | npm - the sandbox test cards as data |
-| `vora.js` | CDN only, `https://js.vonpay.com/v1/vora.js` | `/v1/` channel auto-ships patches | browser SDK for embedded card fields - **no npm package** |
+| `vora.js` | CDN only; `funnel-one-click-node` pins `https://js.vonpay.com/v1.53.0/vora.js` with its integrity hash (`checkout-embedded` still loads the auto-updating `/v1/` channel) | published builds and hashes in `https://js.vonpay.com/integrity.json` | browser SDK for embedded card fields - **no npm package** |
 
 Rules of thumb:
 
@@ -45,6 +45,7 @@ Rules of thumb:
 | Handle a 3DS / `requires_action` challenge | `payment-intents-3ds` |
 | Save a card and rebill it (subscriptions / MIT) | `saved-cards-mit` |
 | Collect card fields in your own page (no redirect) | `checkout-embedded` |
+| One-page funnel: save the card at the order button, then a one-click add-on on the same card | `funnel-one-click-node` |
 | Receive + verify webhooks | `webhooks-node` |
 | Wire an AI agent into the API (MCP) | `agent-mcp` |
 
@@ -90,10 +91,13 @@ Rules of thumb:
    `mirror.order.created`, `payment_method.attached`,
    `merchant.card_testing_suspected`, `subscription.created`,
    `subscription.renewed`, `subscription.payment_failed`,
-   `subscription.cancelled`, `subscription.updated`.
+   `subscription.cancelled`, `subscription.updated`,
+   `charge.duplicate_refunded` (from 4.13.0; opt-in).
 
    `payment_intent.authorized` fires only for a `captureMethod: "manual"`
    payment: the money is held, not taken. Do not fulfil on it; capture or void.
+   It is not currently selectable when creating a webhook subscription (an
+   endpoint that subscribed while it was offered still receives it).
 
    These are **opt-in**. An endpoint receives each one only when it lists it
    by name (a `"*"` subscription does not count), and none is added to an
@@ -110,12 +114,13 @@ Rules of thumb:
      nothing was blocked. Review that window's payments and hold fulfilment of
      approved ones you do not recognise.
    - the five `subscription.*` events (typed from SDK 4.4.0; every Node
-     sample pins `^4.7.0`).
+     sample pins `^4.13.0`).
 
    `webhooks-node` handles `charge.succeeded` / `charge.failed` /
    `charge.refunded` / `refund.failed` (hosted checkout + refunds) and the five
    `subscription.*` events; `payment-intents-3ds` confirms the terminal state
-   from `payment_intent.succeeded` / `payment_intent.failed`.
+   from `payment_intent.succeeded` / `payment_intent.failed` and captures on
+   `payment_intent.authorized`.
 
    For subscriptions, as `webhooks-node` does:
 
@@ -134,8 +139,27 @@ Rules of thumb:
      older than the state you already applied (compare `created`) overwrite it.
 
    There is **no** `session.expired` and **no**
-   `refund.created` event - do not invent them. (A refund shows up as
-   `charge.refunded`.)
+   `refund.created` event - do not invent them. (An ordinary refund shows up
+   as `charge.refunded`; an automatic duplicate refund shows up as
+   `charge.duplicate_refunded` instead.)
+
+   `late_payment_auto_refunded` (from 4.13.0): when
+   `data.late_payment_auto_refunded === true` on `charge.succeeded`,
+   `payment_intent.succeeded` or `charge.refunded`, the payment arrived after
+   its checkout was already closed as not paid, and Von Payments refunded it
+   in full. Do NOT fulfil, cancel or refund an order on such an event. Match
+   it on `payment_intent_id` / `transaction_id`, never on `session_id` (the
+   session may also carry the buyer's good payment). The three events arrive
+   in no guaranteed order, so judge each on its own. The field is absent,
+   never `false`: check `=== true`.
+
+   `charge.duplicate_refunded` (opt-in, from 4.13.0; it cannot be selected
+   until the merchant dashboard lists it): an order was paid twice
+   and Von Payments refunded the extra payment in full. The order's own
+   payment stays paid. Record the duplicate and its refund for your books; do
+   NOT refund, cancel or re-fulfil the order. Its ids all name the duplicate
+   (the order's payment is only `related_payment_intent_id`); never key it on
+   `session_id`. No `charge.refunded` is sent for such a refund.
 
    ⚠️ **Do not subscribe an endpoint to `session.succeeded` / `session.failed`.**
    They are typed and emitted internally, but they are not in the merchant
@@ -144,13 +168,27 @@ Rules of thumb:
    with no error at any layer. `charge.*` is the subscribable family for
    hosted-checkout fulfilment.
 
-2. **Embedded card fields load `vora.js` from the CDN `<script>`** at
-   `https://js.vonpay.com/v1/vora.js`. Do **not** add or npm-install any
-   processor or card-network SDK for embedded checkout - the card is collected
-   in a Von Payments hosted iframe, so card data never touches your server or
-   DOM. The `/v1/` channel is mutable (patch releases ship to it), so it carries
-   no `integrity` attribute; pin an immutable `/vX.Y.Z/` path plus its published
-   SRI hash if you need stricter supply-chain control.
+2. **Embedded card fields load `vora.js` from the CDN `<script>`.** Load a
+   fixed version with its integrity hash, as `funnel-one-click-node` does:
+
+   ```html
+   <script
+     src="https://js.vonpay.com/v1.53.0/vora.js"
+     integrity="sha384-/cgW04ufp8aAyV9bRSGns6zXGri76k64htTLeCz1Wd8huca9dRagLc6BgY/ba5wl"
+     crossorigin="anonymous"
+   ></script>
+   ```
+
+   The browser refuses the script if its bytes do not match the hash, so a
+   changed or tampered file never runs on your payment page. To move to a newer
+   build, change the version and the `integrity` value together, taking the
+   hash from `https://js.vonpay.com/integrity.json`
+   (`versions["v1.X.Y"].sha384`). The alternative is the auto-updating channel
+   `https://js.vonpay.com/v1/vora.js`: you get fixes as soon as they ship, but
+   the file changes under you, so it cannot carry an `integrity` attribute and
+   nothing checks what runs. Do **not** add or npm-install any processor or
+   card-network SDK for embedded checkout - the card is collected in a Von
+   Payments hosted iframe, so card data never touches your server or DOM.
 
 3. **Charge a saved card / recurring.** On the Node SDK pass
    `paymentMethod: { id: "vp_pmt_*" }` to `paymentIntents.create` (the SDK sends
@@ -204,7 +242,8 @@ Rules of thumb:
      and do not tell the buyer this order failed either (HTTP 400, "we
      couldn't match this payment to an order").
    - `paid === true` → show the confirmation. **The webhook
-     (`charge.succeeded`) is the reliable fulfilment trigger**: buyers close
+     (`charge.succeeded`) is the reliable fulfilment trigger** (unless it
+     carries `late_payment_auto_refunded === true`, below): buyers close
      the tab and never load this page. If you also fulfil here, call ONE
      idempotent fulfilment function from both paths, keyed on your order, so
      the two cannot ship it twice (a replayed URL reads `succeeded` again).
@@ -233,7 +272,7 @@ Rules of thumb:
    shows different test cards for their sandbox, those win. The same list is
    published as data in `@vonpay/test-cards`, and the MCP server's
    `vonpay_checkout_list_test_cards` tool returns it (in
-   `@vonpay/checkout-mcp` 6.5.0, which the sample pins).
+   `@vonpay/checkout-mcp` 6.10.0, which the sample pins).
 
 ## What the 4.x types cover
 
@@ -291,7 +330,8 @@ The sample folders are published here from the Von Payments SDK repository
 and compared against it daily. Fixes to a sample land there first and are
 synced here; a change made only to a sample folder in this repo is reported as
 drift and overwritten by the next sync. The top-level files (this file,
-`llms.txt`, `README.md`, `LICENSE`, `renovate.json`, `.github/`) are owned here.
+`llms.txt`, `README.md`, `CLAUDE.md`, `LICENSE`, `.gitattributes`,
+`.gitignore`, `renovate.json`, `.github/`, `scripts/`, `.claude/`) are owned here.
 Sample bugs: open an issue on this repo.
 
 ## Docs

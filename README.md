@@ -8,23 +8,23 @@ Official runnable sample integrations for the Von Payments Checkout API. Clone a
 
 | Sample | Stack | Pattern | Best for |
 |---|---|---|---|
-| [`checkout-nextjs`](./checkout-nextjs) | Next.js 15 / React 19 / TypeScript | Hosted checkout (cart → redirect → confirmation) | Direct merchants on Next.js, Shopify-style storefronts |
+| [`checkout-nextjs`](./checkout-nextjs) | Next.js 16 / React 19 / TypeScript | Hosted checkout (cart → redirect → confirmation) | Direct merchants on Next.js, Shopify-style storefronts |
 | [`checkout-express`](./checkout-express) | Node 20+ / Express 5 / TypeScript | Hosted checkout, server-only | Headless backends, API-only flows, server-rendered apps |
 | [`checkout-flask`](./checkout-flask) | Python 3.9+ / Flask | Hosted checkout, server-only | Python services, internal billing, SaaS server-side |
-| [`checkout-paybylink-nextjs`](./checkout-paybylink-nextjs) | Next.js 15 / React 19 | Pay-by-link (operator generates link, customer pays) | Sales / support flows, B2B, invoicing |
-| [`platform-integrator-nextjs`](./platform-integrator-nextjs) | Next.js 15 / React 19 | **Multi-tenant platform** - per-merchant credential lookup, tenant-scoped sessions, multi-tenant webhook routing | Subscription-billing CRMs, headless commerce platforms, ISVs reselling Vora to their merchants |
+| [`checkout-paybylink-nextjs`](./checkout-paybylink-nextjs) | Next.js 16 / React 19 | Pay-by-link (operator generates link, customer pays) | Sales / support flows, B2B, invoicing |
+| [`platform-integrator-nextjs`](./platform-integrator-nextjs) | Next.js 16 / React 19 | **Multi-tenant platform** - per-merchant credential lookup, tenant-scoped sessions, multi-tenant webhook routing | Subscription-billing CRMs, headless commerce platforms, ISVs reselling Vora to their merchants |
 | [`payment-intents-node`](./payment-intents-node) | Node 20+ / TypeScript | **Server-side Payment Intents** (auth → capture → refund, idempotency replay) | Delayed-capture flows, fraud-check-before-capture, platform integrators driving the lifecycle from their server |
-| [`payment-intents-python`](./payment-intents-python) | Python 3.11+ | Server-side Payment Intents (Python mirror of `payment-intents-node`) | Same as above, on Python stacks |
+| [`payment-intents-python`](./payment-intents-python) | Python 3.9+ | Server-side Payment Intents (Python mirror of `payment-intents-node`) | Same as above, on Python stacks |
 | [`payment-intents-3ds`](./payment-intents-3ds) | Node 20+ / Express 5 / TypeScript | **3DS / `requires_action`** - branch on intent status, top-level redirect to the issuer challenge, confirm terminal state from the webhook | Card flows that hit a 3-D Secure challenge; anyone who must handle `requires_action` correctly |
 | [`saved-cards-mit`](./saved-cards-mit) | Node 20+ / TypeScript | **Saved cards + MIT** - vault a card off-session, anchor a cardholder-initiated charge, rebill with the `mit` block | Subscriptions, recurring billing, stored-credential rebills |
 | [`funnel-one-click-node`](./funnel-one-click-node) | Node 20.6+ / Express 4 / TypeScript + CDN `<script>` | **One-page funnel** - card saved with the shopper's agreement at the order button, first charge from the server, one-click add-on on the same card with a one-charge-per-step lock | Direct-response offers, one-product funnels, post-purchase add-ons |
 | [`checkout-embedded`](./checkout-embedded) | Node 20+ / Express 5 / TypeScript + CDN `<script>` | **Embedded Fields (in-page card fields)** - in-page card collection via `vora.js`, tokenize, charge the `vp_pmt_*` token server-side | In-page checkout without a redirect; staying out of PCI scope while keeping your own UI |
-| [`webhooks-node`](./webhooks-node) | Node 20+ / Express 5 / TypeScript | **Webhook receiver** - verify the `t=,v1=` signature with the `whsec_*` secret, idempotent processing, replay-window enforcement | Any integration that needs to react to async events (`charge.*`, `refund.failed`, `payment_intent.*`, `subscription.*`) |
+| [`webhooks-node`](./webhooks-node) | Node 20+ / Express 5 / TypeScript | **Webhook receiver** - verify the `t=,v1=` signature with the `whsec_*` secret, idempotent processing, replay-window enforcement | Any integration that needs to react to async events (it handles `charge.*`, `refund.failed` and `subscription.*`) |
 | [`agent-mcp`](./agent-mcp) | MCP config (no runtime) | **AI-agent integration** - wire `@vonpay/checkout-mcp` into Claude Code, Cursor, Claude Desktop, or any MCP runtime | Building (or coding with) an agent that creates sessions and drives the payment lifecycle |
 
 Each sample demonstrates the full checkout lifecycle:
 - **Session creation** - server-side, with line items + buyer info
-- **Return confirmation** - `sessions.confirmReturn()` reads the session status from the server; the samples first match the return to the order they started (`expectedSessionId`, `expectedAmount`, `expectedCurrency`), then branch on `paid` / `still_pending`, never on the redirect's signature (a declined payment is signed just as authentically as an approved one)
+- **Return confirmation** - `sessions.confirmReturn()` reads the session status from the server; the samples first match the return to an order they recorded on the server (`expectedAmount`, `expectedCurrency`, plus `expectedSessionId` where the browser carries a cookie from checkout; the pay-by-link and platform samples have no such cookie, so they look the order up by the returned session id and check its amount and currency), then branch on `paid` / `still_pending`, never on the redirect's signature (a declined payment is signed just as authentically as an approved one)
 - **Webhook handling** - HMAC-SHA256 signature verification with the per-endpoint `whsec_*` secret + replay window
 - **Production-shaped error handling** - typed `VonPayError` from `@vonpay/checkout-node`, decline-code awareness
 
@@ -50,7 +50,7 @@ OTP sign-in (any email), no merchant application, no ops approval, no shared dem
 git clone https://github.com/Von-Payments/vonpay-samples.git
 cd vonpay-samples/checkout-nextjs    # or any sample
 
-cp .env.example .env.local           # edit with your three keys
+cp .env.example .env.local           # add your secret key and webhook signing secret
 npm install
 npm run dev
 ```
@@ -79,22 +79,22 @@ A card payment can pause while the buyer completes 3-D Secure, so always send a 
 
 Two surfaces let you skip writing client code entirely and integrate from inside an agent or a terminal:
 
-- **MCP server** - [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp). Drop-in Model Context Protocol server. Add it to Claude Desktop, Cursor, Claude Code, or any MCP-aware runtime, and the agent can create and read sessions, drive payment intents (create, capture, void, refund), save a card, list payments and summarize approval rates, read and change subscriptions, list the sandbox test cards, simulate a payment, and diagnose errors directly (28 tools in 6.5.0). Set `VONPAY_MCP_TOOLS=read` for a reporting agent that must not move money; on a live key, every money action and subscription change waits for a person's approval in the MCP host's prompt. See [`docs.vonpay.com/sdks/mcp`](https://docs.vonpay.com/sdks/mcp) for the install snippet.
+- **MCP server** - [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp). Drop-in Model Context Protocol server. Add it to Claude Desktop, Cursor, Claude Code, or any MCP-aware runtime, and the agent can create and read sessions, drive payment intents (create, capture, void, refund), save a card, list payments and summarize approval rates, read and change subscriptions, list the sandbox test cards, simulate a payment, and diagnose errors directly and manage subscription products (35 tools in the pinned 6.10.0). Set `VONPAY_MCP_TOOLS=read` for a reporting agent that must not move money; on a live key, every money action and subscription change waits for a person's approval in the MCP host's prompt. See [`docs.vonpay.com/sdks/mcp`](https://docs.vonpay.com/sdks/mcp) for the install snippet.
 - **CLI** - [`@vonpay/checkout-cli`](https://www.npmjs.com/package/@vonpay/checkout-cli). One-command session creation, webhook tail, signature verification. Works equally well for ad-hoc testing and as a tool any agent can shell out to. `npx @vonpay/checkout-cli --help`.
 
 The samples themselves are written to be agent-paste-friendly: short files, explicit env vars, no hidden imports, typed errors. Drop a sample folder into Cursor / Claude Code and ask the agent to extend it - it has everything it needs in-context.
 
 ## SDKs
 
-| SDK | Package | Samples pin | Current release (checked 2026-11-04) | Used in |
+| SDK | Package | Samples pin | Current release (checked 2026-11-22) | Used in |
 |---|---|---|---|---|
-| Node.js | [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) | `^4.7.0` (lockfiles `4.7.0`) | `4.7.0` | nextjs, express, paybylink-nextjs, platform-integrator-nextjs, payment-intents-node, payment-intents-3ds, saved-cards-mit, funnel-one-click-node, checkout-embedded, webhooks-node |
-| Python | [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) | `>=4.7,<5` | `4.7.0` | flask, payment-intents-python |
-| CLI | [`@vonpay/checkout-cli`](https://www.npmjs.com/package/@vonpay/checkout-cli) | not pinned | `0.18.0` | install separately for ad-hoc testing or agent-tool use |
-| MCP | [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp) | `^6.5.0` (lockfile `6.5.0`) | `6.5.0` | agent-mcp; install in an MCP-aware runtime (Claude Desktop, Cursor, etc.) |
+| Node.js | [`@vonpay/checkout-node`](https://www.npmjs.com/package/@vonpay/checkout-node) | `^4.13.0` (lockfiles `4.13.0`) | `4.13.0` | nextjs, express, paybylink-nextjs, platform-integrator-nextjs, payment-intents-node, payment-intents-3ds, saved-cards-mit, funnel-one-click-node, checkout-embedded, webhooks-node |
+| Python | [`vonpay-checkout`](https://pypi.org/project/vonpay-checkout/) | `>=4.7,<5` | `4.13.0` | flask, payment-intents-python |
+| CLI | [`@vonpay/checkout-cli`](https://www.npmjs.com/package/@vonpay/checkout-cli) | not pinned | `0.23.0` | install separately for ad-hoc testing or agent-tool use |
+| MCP | [`@vonpay/checkout-mcp`](https://www.npmjs.com/package/@vonpay/checkout-mcp) | `^6.10.0` (lockfile `6.10.0`) | `6.10.0` | agent-mcp; install in an MCP-aware runtime (Claude Desktop, Cursor, etc.) |
 | Test cards | [`@vonpay/test-cards`](https://www.npmjs.com/package/@vonpay/test-cards) | not pinned | `0.2.1` | the sandbox test cards as data, for your own tests or tooling |
 
-Embedded card fields load the browser SDK (`vora.js`) from the CDN `<script>` at `https://js.vonpay.com/v1/vora.js` - there is no npm package for it; see [`checkout-embedded`](./checkout-embedded).
+Embedded card fields load the browser SDK (`vora.js`) from the CDN `<script>` - there is no npm package for it. Load a fixed version with its integrity hash, as [`funnel-one-click-node`](./funnel-one-click-node) does (`https://js.vonpay.com/v1.53.0/vora.js` plus `integrity` and `crossorigin="anonymous"`): the browser refuses a file that does not match the hash. To move to a newer build, change the version and the hash together, taking the hash from `https://js.vonpay.com/integrity.json`. The alternative is the auto-updating channel `https://js.vonpay.com/v1/vora.js`: it gets fixes as soon as they ship, but it changes under you, so it carries no integrity hash and nothing checks what runs. See also [`checkout-embedded`](./checkout-embedded).
 
 The server SDKs are on their `4.x` line. Never pin a `0.x` version: a caret range on `0.x` locks the minor, so the pin can never move. These samples sat on `^0.9.0` for a year that way. Pins are bumped in the SDK repository the samples are published from, then synced here (see [Contributing](#contributing)); check a sample's `package.json` / `requirements.txt` for the range it's actually built against.
 
@@ -114,7 +114,7 @@ When the underlying product surfaces these, samples will land here.
 
 ## Contributing
 
-The sample folders are published here from the Von Payments SDK repository and compared against it daily, so a fix has to land there first. **A PR that edits a sample folder in this repo will be reported as drift and overwritten by the next sync.** Open an issue here instead (a minimal repro is ideal); we land the fix upstream and sync it. PRs are welcome for the top-level files this repo owns: this README, `AGENTS.md`, `llms.txt`, `LICENSE`, `renovate.json`, `.github/`.
+The sample folders are published here from the Von Payments SDK repository and compared against it daily, so a fix has to land there first. **A PR that edits a sample folder in this repo will be reported as drift and overwritten by the next sync.** Open an issue here instead (a minimal repro is ideal); we land the fix upstream and sync it. PRs are welcome for the top-level files this repo owns: this README, `AGENTS.md`, `llms.txt`, `CLAUDE.md`, `LICENSE`, `.gitattributes`, `.gitignore`, `renovate.json`, `.github/`, `scripts/`, `.claude/`.
 
 ## License
 

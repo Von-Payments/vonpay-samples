@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@vonpay/checkout-node": "^4.10.0",
+    "@vonpay/checkout-node": "^4.13.0",
     "express": "^4.22.3"
   },
   "devDependencies": {

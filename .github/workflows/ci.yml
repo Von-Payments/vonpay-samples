@@ -2,7 +2,8 @@ name: CI
 
 on:
   # Docs-only changes (the root guide files, any README) build nothing, so they
-  # skip the 12 sample builds. The leak check (leak-check.yml) still runs on them.
+  # skip the sample builds. leak-check.yml (leak check + root-guide check)
+  # still runs on them.
   push:
     branches: [main]
     paths-ignore: ["**.md", "llms.txt", "LICENSE"]
@@ -10,30 +11,52 @@ on:
     branches: [main]
     paths-ignore: ["**.md", "llms.txt", "LICENSE"]
 
+# Read-only token: these jobs only build. Least privilege per GitHub's
+# Actions hardening guidance.
+permissions:
+  contents: read
+
+# Builds only, nothing deploys: a newer push to the same branch cancels the
+# older run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # One list of samples, derived from the tree: a top-level folder with a
+  # package.json is a Node sample, one with a requirements.txt is a Python
+  # sample (scripts/check-root-docs.mjs --list). A new sample is built and
+  # type-checked without anyone editing this file.
+  list-samples:
+    name: List samples
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      node: ${{ steps.list.outputs.node }}
+      python: ${{ steps.list.outputs.python }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: list
+        run: node scripts/check-root-docs.mjs --list >> "$GITHUB_OUTPUT"
+
   node-samples:
     name: ${{ matrix.sample }} (Node)
+    needs: list-samples
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        sample:
-          - checkout-nextjs
-          - checkout-express
-          - checkout-paybylink-nextjs
-          - platform-integrator-nextjs
-          - payment-intents-node
-          - payment-intents-3ds
-          - saved-cards-mit
-          - funnel-one-click-node
-          - checkout-embedded
-          - webhooks-node
-          - agent-mcp
+        sample: ${{ fromJSON(needs.list-samples.outputs.node) }}
     defaults:
       run:
         working-directory: ./${{ matrix.sample }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -42,7 +65,9 @@ jobs:
           cache-dependency-path: ${{ matrix.sample }}/package-lock.json
 
       - name: Install
-        run: npm install --no-audit --no-fund
+        # npm ci installs exactly the committed lockfile (and fails if it is
+        # out of step with package.json), so CI builds what integrators get.
+        run: npm ci --no-audit --no-fund
 
       - name: Type check
         # Prefer the sample's own typecheck script; fall back to a bare
@@ -77,18 +102,20 @@ jobs:
 
   python-samples:
     name: ${{ matrix.sample }} (Python)
+    needs: list-samples
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        sample:
-          - checkout-flask
-          - payment-intents-python
+        sample: ${{ fromJSON(needs.list-samples.outputs.python) }}
     defaults:
       run:
         working-directory: ./${{ matrix.sample }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:

@@ -149,3 +149,4 @@ __pycache__/
 venv/
 .claude/*.log
 .claude/*.json
+.claude/*-log.md
