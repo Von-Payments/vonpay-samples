@@ -97,8 +97,23 @@ const MAX_OPEN_CHECKOUTS = 10_000;
 
 // Webhook event ids (`vp_evt_*`) already processed to completion. Recorded
 // only AFTER the handler succeeded, so a failed attempt is retried, not
-// dropped. A real app keeps these in a table with a UNIQUE event id.
+// dropped. A real app keeps these in a table with a UNIQUE event id. This Set
+// keeps the newest HANDLED_EVENT_CAP ids, so a flood of signed deliveries
+// cannot grow it without limit.
 const handledEventIds = new Set<string>();
+const HANDLED_EVENT_CAP = 10_000;
+
+function markEventHandled(eventId: string): void {
+  if (handledEventIds.has(eventId)) return;
+  if (handledEventIds.size >= HANDLED_EVENT_CAP) {
+    // Forget the oldest id (a Set iterates in insertion order). ⚠️ A forgotten
+    // id reads as new again if it is ever redelivered: one more reason to keep
+    // these in a database table in production.
+    const oldest = handledEventIds.values().next().value;
+    if (oldest !== undefined) handledEventIds.delete(oldest);
+  }
+  handledEventIds.add(eventId);
+}
 
 function readCookie(header: string | undefined, name: string): string | undefined {
   for (const part of (header ?? "").split(";")) {
@@ -219,6 +234,14 @@ app.post("/webhooks", (req, res) => {
           console.warn(`Webhook ${event.type}: no order for this session; nothing fulfilled.`);
           break;
         }
+        // ⛔ A LATE payment that Von Payments already refunded in full: it
+        // arrived after this checkout was closed as not paid, and the buyer
+        // got the money back. Never fulfil on it, and leave the order as it
+        // is: a payment the buyer made another way is a different event.
+        if (event.data.late_payment_auto_refunded === true) {
+          console.warn(`Order ${order.orderId}: a late payment was refunded automatically. Not fulfilled; order unchanged.`);
+          break;
+        }
         // ⛔ Check what was paid against the order before fulfilling. A
         // payment for another amount or currency is not this order as priced:
         // hold it for a person. A field the event leaves out is not a mismatch.
@@ -261,7 +284,7 @@ app.post("/webhooks", (req, res) => {
   }
 
   // Record the event only now, after it was processed without throwing.
-  handledEventIds.add(event.id);
+  markEventHandled(event.id);
   res.json({ received: true });
 });
 

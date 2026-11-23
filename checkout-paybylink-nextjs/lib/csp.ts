@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
@@ -18,6 +19,12 @@ import { NextResponse, type NextRequest } from "next/server";
  *
  * Styles keep `'unsafe-inline'`: the pages use `style={…}` attributes, which a
  * nonce cannot allow.
+ *
+ * Hosts: the browser talks only to this site. It goes to the hosted checkout by
+ * a plain navigation (a link, `window.location`, or a form post answered with a
+ * redirect), and only that last one is checked by the policy (`form-action`).
+ * Your server, not the browser, calls the Von Payments API. Add a host here
+ * only when a page really loads from it, and only a host that exists.
  */
 export function contentSecurityPolicy(nonce: string): string {
   const dev = process.env.NODE_ENV === "development";
@@ -26,8 +33,8 @@ export function contentSecurityPolicy(nonce: string): string {
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${dev ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
-    "connect-src 'self' https://api.vonpay.com https://checkout.vonpay.com",
-    "frame-src https://checkout.vonpay.com",
+    "connect-src 'self'",
+    "frame-src 'none'",
     "object-src 'none'",
     "frame-ancestors 'none'",
     "base-uri 'self'",
@@ -37,9 +44,18 @@ export function contentSecurityPolicy(nonce: string): string {
   ].join("; ");
 }
 
+/**
+ * A new nonce: 16 random bytes (128 bits), base64. proxy.ts runs on the
+ * Node.js runtime (the only runtime Next.js 16 gives a proxy), so `node:crypto`
+ * is available there.
+ */
+export function newNonce(): string {
+  return randomBytes(16).toString("base64");
+}
+
 /** Let the request through with a fresh nonce on it and the policy on the response. */
 export function nextWithContentSecurityPolicy(req: NextRequest): NextResponse {
-  const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
+  const nonce = newNonce();
   const policy = contentSecurityPolicy(nonce);
   const headers = new Headers(req.headers);
   headers.set("x-nonce", nonce);

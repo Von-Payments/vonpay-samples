@@ -41,7 +41,10 @@ const store = globalThis as typeof globalThis & {
 const ordersBySession = (store.__vonpaySampleOrders ??= new Map<string, OrderRecord>());
 const sessionByCheckoutRef = (store.__vonpaySampleCheckoutRefs ??= new Map<string, string>());
 // Webhook event ids (`vp_evt_*`) processed to completion. A real app keeps
-// these in a table with a UNIQUE event id.
+// these in a table with a UNIQUE event id. This Set keeps the newest
+// HANDLED_EVENT_CAP ids, so a flood of signed deliveries cannot grow it
+// without limit.
+export const HANDLED_EVENT_CAP = 10_000;
 const handledEventIds = (store.__vonpaySampleHandledEvents ??= new Set<string>());
 
 export function hasRoomForCheckout(): boolean {
@@ -72,5 +75,13 @@ export function eventAlreadyHandled(eventId: string): boolean {
 
 /** Record a webhook event as processed. Call only AFTER the handler succeeded. */
 export function markEventHandled(eventId: string): void {
+  if (handledEventIds.has(eventId)) return;
+  if (handledEventIds.size >= HANDLED_EVENT_CAP) {
+    // Forget the oldest id (a Set iterates in insertion order). ⚠️ A forgotten
+    // id reads as new again if it is ever redelivered: one more reason to keep
+    // these in a database table in production.
+    const oldest = handledEventIds.values().next().value;
+    if (oldest !== undefined) handledEventIds.delete(oldest);
+  }
   handledEventIds.add(eventId);
 }

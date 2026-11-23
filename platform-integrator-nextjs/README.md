@@ -18,7 +18,7 @@ The patterns that aren't obvious from the single-merchant samples:
 | Tenant-scoped confirmation via each tenant's own API key | `app/tenants/[merchantId]/confirm/page.tsx` |
 | **Multi-tenant webhook routing** - single endpoint, route by `merchant_id` | `app/api/webhooks/route.ts` |
 | Per-tenant webhook signature verification with the tenant's `whsec_*` | `app/api/webhooks/route.ts` |
-| In-memory event idempotency dedup | `app/api/webhooks/route.ts` (replace with Redis in production) |
+| In-memory event idempotency dedup (24 h, at most the newest 10,000 keys) | `app/api/webhooks/route.ts` (replace with Redis in production) |
 | A webhook only touches the verified tenant's own orders | `app/api/webhooks/route.ts` → `orderOfTenant` |
 | Sign-in for the platform pages and `/api/charge` (`ADMIN_TOKEN`) | `proxy.ts` |
 | Content Security Policy with a per-request nonce, and the fixed security headers | `proxy.ts` + `lib/csp.ts`, `next.config.ts` |
@@ -137,7 +137,7 @@ const order = orderOfTenant(tenant.id, event.data.session_id);
 if (!order) break; // not an order this tenant created here: change nothing, still ack
 ```
 
-A valid signature proves which **tenant** sent the event, not which order it may change. Each tenant registers its own endpoint and can read its own `whsec_*`, so a tenant (or anyone who obtains one tenant's secret) can sign an event that names another tenant's session id - and session ids are not secret, they travel in checkout and return URLs. So the handler looks the order up in your own records and acts only when `order.tenantId === tenant.id`, the same rule the confirm page applies. Anything else is acknowledged and ignored. A `charge.succeeded` for a different amount or currency than the order is held for review, not marked paid.
+A valid signature proves which **tenant** sent the event, not which order it may change. Each tenant registers its own endpoint and can read its own `whsec_*`, so a tenant (or anyone who obtains one tenant's secret) can sign an event that names another tenant's session id - and session ids are not secret, they travel in checkout and return URLs. So the handler looks the order up in your own records and acts only when `order.tenantId === tenant.id`, the same rule the confirm page applies. Anything else is acknowledged and ignored. A `charge.succeeded` for a different amount or currency than the order is held for review, not marked paid. A `charge.succeeded` with `late_payment_auto_refunded: true` is not fulfilled and changes nothing: it is a late payment that was refunded in full automatically.
 
 ### Idempotent event processing
 

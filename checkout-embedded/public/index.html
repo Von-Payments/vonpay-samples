@@ -10,7 +10,11 @@
       with Subresource Integrity: the browser refuses the file if its bytes
       differ from this hash. The hash is the published one for this version
       (https://js.vonpay.com/integrity.json, key versions["v1.54.1"].sha384).
-      Change the version and the hash together when you re-pin.
+      data-vora-csp-integrity is the sha384 of that version's csp.json (same
+      file, versions["v1.54.1"].artifacts, the entry with role "csp"): the
+      server checks the list it builds its Content Security Policy from
+      against it, and will not start on a mismatch. Change the version and
+      BOTH hashes together when you re-pin.
 
       This is the supported delivery channel for the browser SDK. The script
       attaches a global `Vora` constructor to `window`.
@@ -24,6 +28,7 @@
       src="https://js.vonpay.com/v1.54.1/vora.js"
       integrity="sha384-SZhMd+iYRArjDgHq08tAqKu5WZJ9V6cChe5udrnY3YQXyPlsfseQWqP8oKTaAjhP"
       crossorigin="anonymous"
+      data-vora-csp-integrity="sha384-qh03Pd0VBrY6O5vtpb/riOuhYt7eqMnXfToEtxAmdnaPuTUFfmZG4lcbHH5yZM/f"
     ></script>
     <noscript>This embedded checkout requires JavaScript.</noscript>
 

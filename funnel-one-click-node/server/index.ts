@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import { VonPayCheckout, type MITReason } from "@vonpay/checkout-node";
 import { DEFAULT_TERMS, createApp, termsMentionLaterCharges } from "./app.js";
-import { keyModeOf, loadVoraCsp, pinnedVoraVersionOf } from "./vora-csp.js";
+import { keyModeOf, loadVoraCsp, pinnedVoraOf } from "./vora-csp.js";
 
 const SECRET_KEY = process.env.VON_PAY_SECRET_KEY;
 const PUBLISHABLE_KEY = process.env.VON_PAY_PUBLISHABLE_KEY ?? "";
@@ -115,13 +115,14 @@ if (STORED_CREDENTIAL_USE === undefined && termsMentionLaterCharges(DEFAULT_TERM
 }
 
 // The page's Content Security Policy, from vora.js's published list for the
-// version public/index.html pins, test or live list by the key's mode. If it
-// cannot be read, refuse to start: see vora-csp.ts.
+// version public/index.html pins (checked against the csp.json hash pinned on
+// the same script tag), test or live list by the key's mode. If it cannot be
+// read or does not match, refuse to start: see vora-csp.ts.
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "public");
 let contentSecurityPolicy: string;
 try {
   contentSecurityPolicy = await loadVoraCsp({
-    version: pinnedVoraVersionOf(join(PUBLIC_DIR, "index.html")),
+    ...pinnedVoraOf(join(PUBLIC_DIR, "index.html")),
     mode: keyModeOf(SECRET_KEY || PUBLISHABLE_KEY),
     apiOrigin: API_BASE ? new URL(API_BASE).origin : undefined,
   });

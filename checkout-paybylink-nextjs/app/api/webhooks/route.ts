@@ -123,7 +123,13 @@ export async function POST(req: NextRequest) {
   // success. An endpoint subscribed to `session.succeeded` receives nothing,
   // forever, with no error raised at any layer, and every paid link would sit
   // at `pending` for good. `charge.*` is the subscribable family.
-  if (event.type === "charge.succeeded") {
+  if (event.type === "charge.succeeded" && event.data.late_payment_auto_refunded === true) {
+    // ⛔ A LATE payment that Von Payments already refunded in full: it arrived
+    // after this checkout was closed as not paid, and the buyer got the money
+    // back. Never mark the link paid on it, and leave the link as it is: a
+    // payment the buyer made another way is a different event.
+    console.log(`webhook ${event.type} → a late payment was refunded automatically; link unchanged`);
+  } else if (event.type === "charge.succeeded") {
     nextStatus = "paid";
     // `vp_tx_id` is the id to compare. `transaction_id` is not one id space:
     // two events for the SAME payment can carry different values in it, so it
@@ -162,11 +168,14 @@ export async function POST(req: NextRequest) {
   //
   // `abandoned_payment_reversed` is the payment system giving back a payment
   // that was already closed (you never got its `charge.succeeded`), or releasing
-  // its hold. It says nothing about the payment that paid this link.
+  // its hold. It says nothing about the payment that paid this link. The same
+  // goes for `late_payment_auto_refunded`: the automatic refund of a late
+  // payment, which never paid this link.
   if (
     event.type === "charge.refunded" &&
     event.data.session_id &&
-    event.data.reason !== "abandoned_payment_reversed"
+    event.data.reason !== "abandoned_payment_reversed" &&
+    event.data.late_payment_auto_refunded !== true
   ) {
     const updated = recordRefund(event.data.session_id, {
       transactionId: event.data.vp_tx_id ?? event.data.transaction_id ?? undefined,

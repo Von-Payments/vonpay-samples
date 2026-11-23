@@ -2,7 +2,7 @@
 
 import os
 import uuid
-from typing import Any, Dict, Set
+from typing import Any, Dict
 
 from flask import Flask, Response, redirect, request, jsonify
 from flask.typing import ResponseReturnValue
@@ -66,8 +66,21 @@ MAX_OPEN_CHECKOUTS = 10_000
 
 # Webhook event ids (``vp_evt_*``) processed to completion. Recorded only AFTER
 # the handler succeeded, so a failed attempt is retried, not dropped. A real
-# app keeps these in a table with a UNIQUE event id.
-HANDLED_EVENT_IDS: Set[str] = set()
+# app keeps these in a table with a UNIQUE event id. A dict keeps insertion
+# order, so it keeps the newest HANDLED_EVENT_CAP ids: a flood of signed
+# deliveries cannot grow it without limit.
+HANDLED_EVENT_IDS: Dict[str, None] = {}
+HANDLED_EVENT_CAP = 10_000
+
+
+def _mark_event_handled(event_id: str) -> None:
+    if event_id in HANDLED_EVENT_IDS:
+        return
+    if len(HANDLED_EVENT_IDS) >= HANDLED_EVENT_CAP:
+        # Forget the oldest id. A forgotten id reads as new again if it is ever
+        # redelivered: one more reason to keep these in a database table.
+        del HANDLED_EVENT_IDS[next(iter(HANDLED_EVENT_IDS))]
+    HANDLED_EVENT_IDS[event_id] = None
 
 
 # ⚠ Before deploying, rate-limit /checkout (per IP and per buyer) and put bot
@@ -162,6 +175,16 @@ def webhooks() -> ResponseReturnValue:
                 # Not a checkout this app started (or it restarted and forgot).
                 # Acknowledge: a retry cannot make the order appear.
                 app.logger.warning("Webhook %s: no order for this session; nothing fulfilled.", event.type)
+            elif data.get("late_payment_auto_refunded") is True:
+                # ⛔ A LATE payment that Von Payments already refunded in full:
+                # it arrived after this checkout was closed as not paid, and the
+                # buyer got the money back. Never fulfil on it, and leave the
+                # order as it is: a payment the buyer made another way is a
+                # different event.
+                app.logger.warning(
+                    "Order %s: a late payment was refunded automatically. Not fulfilled; order unchanged.",
+                    order["order_id"],
+                )
             elif not _paid_as_priced(order, data.get("amount"), data.get("currency")):
                 # ⛔ A payment for another amount or currency is not this order
                 # as priced: hold it for a person. A field the event leaves out
@@ -193,7 +216,7 @@ def webhooks() -> ResponseReturnValue:
         return jsonify({"error": "handler_failed"}), 500
 
     # Record the event only now, after it was processed without throwing.
-    HANDLED_EVENT_IDS.add(event.id)
+    _mark_event_handled(event.id)
     return jsonify({"received": True})
 
 

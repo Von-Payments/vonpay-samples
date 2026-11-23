@@ -587,6 +587,18 @@ app.post("/webhooks", async (req: Request, res: Response): Promise<void> => {
 
   switch (event.type) {
     case "payment_intent.succeeded":
+      // ⛔ A LATE payment that Von Payments already refunded in full: it
+      // arrived after its checkout was closed as not paid, and the buyer got
+      // the money back. Do NOT fulfil on it, and leave the order as it is.
+      if (event.data.late_payment_auto_refunded === true) {
+        console.log({
+          route: "/webhooks",
+          type: event.type,
+          eventId: event.id,
+          msg: "late_payment_auto_refunded_not_fulfilled",
+        });
+        break;
+      }
       // 3DS passed (or no challenge was needed) and funds settled. THIS is the
       // signal to fulfill — not the /3ds/return page. Look the order up by
       // event.data.payment_intent_id (and dedupe on event.id) and mark it paid.
