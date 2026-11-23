@@ -8,7 +8,7 @@
 
 - @vonpay/checkout-node - samples pin ^4.13.0 (lockfiles 4.13.0); current 4.13.0 (npm)  # Node / TypeScript server SDK
 - vonpay-checkout - samples pin >=4.7,<5; current 4.13.0 (PyPI)                     # Python server SDK; Python 3.9+
-- @vonpay/checkout-mcp - sample pins ^6.10.0 (lockfile 6.10.0); current 6.10.0 (npm)  # MCP server for AI-agent runtimes; the pinned 6.10.0 registers 35 tools incl. payment reports, subscription changes, subscription products and payment tries; VONPAY_MCP_TOOLS=read registers only the 14 read tools (the sample config starts with it set and pins @vonpay/checkout-mcp@6.10.0; on a sandbox key the other tools run with no approval prompt); live-key money actions need a person's approval
+- @vonpay/checkout-mcp - sample pins ^6.10.0 (lockfile 6.10.0); current 6.10.0 (npm)  # MCP server for AI-agent runtimes; the pinned 6.10.0 registers 35 tools incl. payment reports, subscription changes, subscription products and payment tries; VONPAY_MCP_TOOLS=read registers only the 14 read tools (the sample config starts with it set and pins @vonpay/checkout-mcp@6.10.0; remove it or set it to all for the other tools, which on a sandbox key run with no approval prompt); live-key money actions need a person's approval
 - @vonpay/checkout-cli - not pinned by any sample; current 0.23.0 (npm)            # CLI for ad-hoc testing / agent tool use
 - @vonpay/test-cards - not pinned by any sample; current 0.2.1 (npm)               # the sandbox test cards as data
 - vora.js - CDN only; checkout-embedded and funnel-one-click-node pin https://js.vonpay.com/v1.54.1/vora.js with its integrity hash (the auto-updating /v1/ channel is a stated alternative, not the default) (builds + hashes: https://js.vonpay.com/integrity.json)  # browser SDK for embedded card fields; NO npm package
@@ -135,10 +135,15 @@ assuming. "Current" above is a point-in-time reading.
    keys, one for live keys; its hash is in integrity.json). checkout-embedded
    and funnel-one-click-node build their policy from it at start (vora-csp.ts):
    the version public/index.html pins, the list for the key's prefix, plus
-   'self', no inline scripts. If the file cannot be fetched or does not match,
-   they refuse to start rather than guess. So both need a key and network
-   access to start (the funnel no longer starts without keys); a re-pin takes
-   effect at the next restart.
+   'self' (and the API origin when VON_PAY_BASE_URL is set). The v1.54.1
+   list allows no inline scripts and does allow inline styles
+   (style-src 'unsafe-inline'). If the file cannot be fetched, is for another
+   version, or lists a source other than an https:// host, 'self' or
+   'unsafe-inline', they refuse to start rather than guess. They do not
+   check the file against its hash in integrity.json. So both need network
+   access to start, and a key: checkout-embedded needs its secret and
+   publishable keys, and the funnel refuses to start with neither. A re-pin
+   takes effect at the next restart.
 
 3. Charging a saved card / recurring.
    Node: pass `paymentMethod: { id: "vp_pmt_*" }` to `paymentIntents.create`
