@@ -137,6 +137,7 @@ If you sell memberships, select the five subscription events **by name** on your
 | `subscription.cancelled` | Marks cancelled with `cancel_reason` | Any cancel (your API, staff, the customer, a chargeback). No refund is implied |
 | `subscription.updated` | Applies the new state; logs `changed_fields` and `actor` | Show who changed what in your support view |
 | `charge.*` / `payment_intent.*` with a `subscription_id` (not `charge.refunded`) | Logs it as a renewal payment | Never fulfil it, or fail an order, as a new purchase: the order comes from `subscription.renewed`, a failed renewal from `subscription.payment_failed`. A refund of a renewal charge is still a refund |
+| `charge.succeeded` with `late_payment_auto_refunded: true` | Logs `late_payment_auto_refunded_not_fulfilled` | Do not fulfil, cancel or refund an order on it: a late payment was refunded in full automatically. The `charge.refunded` that goes with it (`reason: "abandoned_payment_reversed"`) is not a refund of a sale either |
 | Any event type it does not know, `subscription.*` included | Logs it and acknowledges with `200` | Never fail a delivery you do not recognise |
 
 Two guards make a repeat harmless: the event-id guard on the route, and the `subscription_id` + `billing_cycle` key on renewal orders (two different events for the same cycle still create one order).

@@ -42,7 +42,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { VonPayCheckout } from "@vonpay/checkout-node";
 import { createApp } from "./app.js";
-import { keyModeOf, loadVoraCsp, pinnedVoraVersionOf } from "./vora-csp.js";
+import { keyModeOf, loadVoraCsp, pinnedVoraOf } from "./vora-csp.js";
 
 const SECRET_KEY = process.env.VON_PAY_SECRET_KEY;
 const PUBLISHABLE_KEY = process.env.VON_PAY_PUBLISHABLE_KEY;
@@ -106,13 +106,14 @@ const TRUST_PROXY =
       : TRUST_PROXY_ENV;
 
 // The page's Content Security Policy, from vora.js's published list for the
-// version public/index.html pins, test or live list by the key's mode. If it
-// cannot be read, refuse to start: see vora-csp.ts.
+// version public/index.html pins (checked against the csp.json hash pinned on
+// the same script tag), test or live list by the key's mode. If it cannot be
+// read or does not match, refuse to start: see vora-csp.ts.
 let contentSecurityPolicy: string;
 try {
   const page = path.join(path.dirname(fileURLToPath(import.meta.url)), "public", "index.html");
   contentSecurityPolicy = await loadVoraCsp({
-    version: pinnedVoraVersionOf(page),
+    ...pinnedVoraOf(page),
     mode: keyModeOf(SECRET_KEY),
     apiOrigin: API_BASE ? new URL(API_BASE).origin : undefined,
   });

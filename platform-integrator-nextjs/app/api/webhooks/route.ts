@@ -49,6 +49,9 @@ import { getOrderBySession, type OrderRecord } from "@/lib/orders";
 // handler below for why the tenant is part of it.
 const seenEventKeys = new Map<string, number>();
 const SEEN_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+// And at most this many keys, so a flood of signed deliveries inside the 24 h
+// cannot grow the map without limit.
+const SEEN_KEY_CAP = 10_000;
 
 /** Peek — has this event already been processed to COMPLETION? Does not record. */
 function alreadyCompleted(eventKey: string): boolean {
@@ -81,6 +84,13 @@ function alreadyCompleted(eventKey: string): boolean {
  * does not.
  */
 function markCompleted(eventKey: string): void {
+  if (!seenEventKeys.has(eventKey) && seenEventKeys.size >= SEEN_KEY_CAP) {
+    // Forget the oldest key (a Map iterates in insertion order). ⚠️ A forgotten
+    // key reads as new again if it is ever redelivered: one more reason for
+    // the durable table described above.
+    const oldest = seenEventKeys.keys().next().value;
+    if (oldest !== undefined) seenEventKeys.delete(oldest);
+  }
   seenEventKeys.set(eventKey, Date.now());
 }
 
@@ -257,6 +267,14 @@ export async function POST(req: NextRequest) {
         console.warn(`[${tenant.name}] ${event.type} for no order of this tenant — ignored`);
         break;
       }
+      // ⛔ A LATE payment that Von Payments already refunded in full: it
+      // arrived after this checkout was closed as not paid, and the buyer got
+      // the money back. Never fulfil on it, and leave the order as it is: a
+      // payment the buyer made another way is a different event.
+      if (event.data.late_payment_auto_refunded === true) {
+        console.warn(`[${tenant.name}] order ${order.orderId}: a late payment was refunded automatically; not fulfilled, order unchanged`);
+        break;
+      }
       // ⛔ Check what was paid against the order before fulfilling. A payment
       // for another amount or currency is not this order as priced: hold it
       // for a person. A field the event leaves out is not a mismatch.
@@ -297,6 +315,10 @@ export async function POST(req: NextRequest) {
       // Those two are ambiguous across payment connectors on a SECOND partial
       // refund — some report this refund's delta, some the cumulative total.
       // Compare `amount_refunded_total` against `original_charge_amount`.
+      //
+      // ⛔ `reason: "abandoned_payment_reversed"` (and `late_payment_auto_refunded:
+      // true`) is Von Payments giving back a LATE payment by itself. No sale was
+      // refunded: do not cancel or refund the order on it.
       break;
     case "refund.failed":
       // A refund could NOT be completed — no money moved on this event. Put

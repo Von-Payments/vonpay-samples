@@ -55,9 +55,23 @@ const holder = globalThis as typeof globalThis & {
 };
 const store = (holder.__vonpaySamplePayLinks ??= new Map<string, PayLink>());
 
+/**
+ * ⚠ In memory, so a flood of new links grows the store without limit. At the
+ * cap `POST /api/links` refuses a new link (503) rather than forget one a buyer
+ * may be paying. A real app keeps links in its database.
+ */
+export const MAX_LINKS = 10_000;
+
+export function hasRoomForLink(): boolean {
+  return store.size < MAX_LINKS;
+}
+
 // Webhook event ids (`vp_evt_*`) already processed to completion. In
 // production keep these in a table with a UNIQUE index on the event id: this
-// Set forgets everything on restart and is not shared between instances.
+// Set forgets everything on restart and is not shared between instances. It
+// keeps the newest HANDLED_EVENT_CAP ids, so a flood of signed deliveries
+// cannot grow it without limit.
+export const HANDLED_EVENT_CAP = 10_000;
 const handledEventIds = (holder.__vonpaySamplePayLinkEvents ??= new Set<string>());
 
 /** Peek: has this webhook event already been processed? Does not record. */
@@ -72,6 +86,14 @@ export function eventAlreadyHandled(eventId: string): boolean {
  * a manual resend) is dropped as a duplicate.
  */
 export function markEventHandled(eventId: string): void {
+  if (handledEventIds.has(eventId)) return;
+  if (handledEventIds.size >= HANDLED_EVENT_CAP) {
+    // Forget the oldest id (a Set iterates in insertion order). ⚠️ A forgotten
+    // id reads as new again if it is ever redelivered: one more reason to keep
+    // these in a database table in production.
+    const oldest = handledEventIds.values().next().value;
+    if (oldest !== undefined) handledEventIds.delete(oldest);
+  }
   handledEventIds.add(eventId);
 }
 

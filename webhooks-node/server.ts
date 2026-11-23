@@ -348,6 +348,20 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
           handleSubscriptionEvent(event.type, event.data, event.created);
           break;
         case "charge.succeeded":
+          // ⛔ A LATE payment that Von Payments already refunded in full: it
+          // arrived after its checkout was closed as not paid, and the buyer
+          // got the money back. Do NOT fulfil on it, and do not change the
+          // order: a payment the buyer made another way is a different event.
+          if (event.data.late_payment_auto_refunded === true) {
+            console.log({
+              level: "warn",
+              route: "/webhooks/vonpay",
+              event: event.type,
+              msg: "late_payment_auto_refunded_not_fulfilled",
+              merchantId: event.merchant_id,
+            });
+            break;
+          }
           // → fulfill the order, send the receipt, mark the order paid in your DB.
           // This is the fulfilment event. Session and transaction IDs are
           // sensitive deep-link tokens — pass them to your fulfillment system but
@@ -375,6 +389,11 @@ app.post("/webhooks/vonpay", (req: Request, res: Response): void => {
           break;
         case "charge.refunded":
           // → reverse fulfillment, post a credit memo, notify the buyer.
+          //
+          // ⛔ Not when `reason` is `abandoned_payment_reversed` (or the event
+          // carries `late_payment_auto_refunded: true`): Von Payments gave back
+          // a LATE payment by itself and no sale was refunded. Do not cancel or
+          // refund the order on it, and do not refund it again.
           //
           // ⚠️ Read `refund_amount` (what THIS event moved) and
           // `amount_refunded_total` (running total against the charge), NOT

@@ -102,7 +102,7 @@ Declines are decided by the order total, not the card: an ordinary total like th
 
 The buyer's browser returning to `/3ds/return` tells you the challenge *finished*, not that it *passed* - the browser can be closed, lose connectivity, or be tampered with mid-flow. So the return page trusts nothing from the link except which order came back, and it reads the payment from the API. The link carries the order's id because the payment provider adds only its own `transaction_id` and `transaction_status`. The terminal state is confirmed server-side:
 
-- `payment_intent.succeeded` → 3DS passed and funds settled. **This** is the signal to fulfill.
+- `payment_intent.succeeded` → 3DS passed and funds settled. **This** is the signal to fulfill. Not when it carries `late_payment_auto_refunded: true`: that is a late payment Von Payments refunded in full automatically, so the order stays as it is.
 - `payment_intent.failed` → challenge rejected or charge declined. Do **not** fulfill.
 - `payment_intent.authorized` → 3DS passed on a manual-capture payment. The money is held, not taken, so **this sample captures it here**, with the order's `{order}:capture` key. Do **not** fulfill yet: wait for `payment_intent.succeeded`.
 

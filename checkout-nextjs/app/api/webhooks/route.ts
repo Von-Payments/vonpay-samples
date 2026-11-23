@@ -123,6 +123,14 @@ export async function POST(req: NextRequest) {
           console.warn(`Webhook ${event.type}: no order for this session; nothing fulfilled.`);
           break;
         }
+        // ⛔ A LATE payment that Von Payments already refunded in full: it
+        // arrived after this checkout was closed as not paid, and the buyer
+        // got the money back. Never fulfil on it, and leave the order as it
+        // is: a payment the buyer made another way is a different event.
+        if (event.data.late_payment_auto_refunded === true) {
+          console.warn(`Order ${order.orderId}: a late payment was refunded automatically. Not fulfilled; order unchanged.`);
+          break;
+        }
         // ⛔ Check what was paid against the order before fulfilling. A
         // payment for another amount or currency is not this order as priced:
         // hold it for a person. A field the event leaves out is not a mismatch.

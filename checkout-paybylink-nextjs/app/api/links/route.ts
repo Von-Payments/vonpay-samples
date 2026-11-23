@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { VonPayCheckout } from "@vonpay/checkout-node";
-import { saveLink, listLinks, type PayLink } from "@/lib/storage";
+import { hasRoomForLink, saveLink, listLinks, type PayLink } from "@/lib/storage";
 
 const vonpay = new VonPayCheckout({
   apiKey: process.env.VON_PAY_SECRET_KEY!,
@@ -36,6 +36,10 @@ export async function POST(req: NextRequest) {
   }
   if (!description) {
     return NextResponse.json({ error: "description is required" }, { status: 400 });
+  }
+  // At the cap, refuse a NEW link. Never drop an old one: a buyer may be paying it.
+  if (!hasRoomForLink()) {
+    return NextResponse.json({ error: "Too many pay links. Please try again later." }, { status: 503 });
   }
 
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
