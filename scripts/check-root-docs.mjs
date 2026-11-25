@@ -15,8 +15,8 @@
 //      on both, or the check fails first.
 //   3. The vonpay-checkout pin from requirements.txt (same agreement rule).
 //   4. The vora.js version the samples pin in a live <script src> tag
-//      (js.vonpay.com/vX.Y.Z/vora.js, outside HTML comments), when any sample
-//      pins one (same agreement rule).
+//      (js.vonpay.com/vX.Y.Z/vora.js, outside HTML comments, at most 1000
+//      characters before src), when any sample pins one (same agreement rule).
 //   5. A "checked YYYY-MM-DD" line exists.
 //
 // Not covered: "current release" numbers, the freshness of the checked date,
@@ -143,12 +143,25 @@ function walk(dir, out) {
   }
   return out;
 }
+// Plain index search, one pass: a lazy regex rescans the rest of the file for
+// every unclosed "<!--". An unclosed comment is kept, as text.
+function withoutComments(html) {
+  let out = "";
+  let at = 0;
+  for (;;) {
+    const open = html.indexOf("<!--", at);
+    const close = open === -1 ? -1 : html.indexOf("-->", open + 4);
+    if (close === -1) return out + html.slice(at);
+    out += html.slice(at, open);
+    at = close + 3;
+  }
+}
 const voraPins = new Map(); // "file#n" -> version
 for (const s of samples) {
   for (const file of walk(join(ROOT, s), [])) {
-    const text = readFileSync(file, "utf8").replace(/<!--[\s\S]*?-->/g, "");
+    const text = withoutComments(readFileSync(file, "utf8"));
     let n = 0;
-    for (const m of text.matchAll(/<script\b[^>]*\bsrc=["']https:\/\/js\.vonpay\.com\/v(\d+\.\d+\.\d+)\/vora\.js["']/g)) {
+    for (const m of text.matchAll(/<script\b[^>]{0,1000}\bsrc=["']https:\/\/js\.vonpay\.com\/v(\d+\.\d+\.\d+)\/vora\.js["']/g)) {
       voraPins.set(`${file.slice(ROOT.length + 1)}#${++n}`, `v${m[1]}`);
     }
   }
