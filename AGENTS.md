@@ -195,11 +195,14 @@ Rules of thumb:
    vora.js version publishes the sources it needs at
    `https://js.vonpay.com/v<version>/csp.json`, one list for test keys and one
    for live keys (the file's hash is in `integrity.json`). `checkout-embedded`
-   and `funnel-one-click-node` build their policy from it at start
-   (`vora-csp.ts`). The pinned script tag carries the file's sha384 in
+   and `funnel-one-click-node` keep that file, byte for byte, as
+   `public/csp.json` and build their policy from it at start (`vora-csp.ts`),
+   with no network. The pinned script tag carries the file's sha384 in
    `data-vora-csp-integrity`, next to the script's own `integrity` value; the
-   server hashes the fetched bytes before reading them and refuses to start on
-   a mismatch. To re-pin vora.js, change the version, `integrity` and
+   server hashes the file's bytes before reading them and refuses to start on
+   a mismatch. To re-pin vora.js, download the new version's `csp.json` into
+   `public/` (never edit it; the sample's `.gitattributes` keeps git from
+   changing its line endings) and change the version, `integrity` and
    `data-vora-csp-integrity` together, all three from `integrity.json`. The
    server then picks the list for the key's mode (test or live, from its
    prefix), adds `'self'` to the script, style, image, font and connect
@@ -208,13 +211,14 @@ Rules of thumb:
    'self'`, `object-src 'none'`, `frame-ancestors 'none'` and a few more). It
    refuses any `'unsafe-…'` keyword except `'unsafe-inline'` in `style-src`,
    so inline scripts and eval are never allowed (the v1.54.1 list does ask for
-   inline styles). It also refuses to start if the file cannot be fetched, is
-   for another version, names a directive the sample does not use, or lists a
-   source other than an `https://` host or `'self'`, and when the script tag
-   has no valid `data-vora-csp-integrity`. So both need network access to
-   start, and a key: `checkout-embedded` needs its secret and publishable
-   keys, and the funnel refuses to start with neither. A re-pin of vora.js
-   takes effect at the next restart.
+   inline styles). It also refuses to start if the file cannot be read, is for
+   another version, names a directive the sample does not use, lists a source
+   other than an `https://` host or `'self'`, is not valid JSON or has no list
+   for the key's mode, and when the script tag has no valid
+   `data-vora-csp-integrity`. Neither needs network access to start, but both
+   need a key: `checkout-embedded` needs its secret and publishable keys, and
+   the funnel refuses to start with neither. A re-pin of vora.js takes effect
+   at the next restart.
 
 3. **Charge a saved card / recurring.** On the Node SDK pass
    `paymentMethod: { id: "vp_pmt_*" }` to `paymentIntents.create` (the SDK sends
