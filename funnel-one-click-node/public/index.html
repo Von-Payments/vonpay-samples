@@ -10,9 +10,9 @@
       (https://js.vonpay.com/integrity.json, key versions["v1.54.1"].sha384).
       data-vora-csp-integrity is the sha384 of that version's csp.json (same
       file, versions["v1.54.1"].artifacts, the entry with role "csp"): the
-      server checks the list it builds its Content Security Policy from
-      against it, and will not start on a mismatch. Change the version and
-      BOTH hashes together when you re-pin. The page's own
+      server checks csp.json beside this page, the list it builds its Content
+      Security Policy from, against it, and will not start on a mismatch. Change
+      the version, BOTH hashes and csp.json together when you re-pin. The page's own
       wording as the shopper's agreement (`vora.elements.create({
       setupForFutureUse: "off_session" })`) needs vora.js 1.43.0 or later.
     -->

@@ -1,34 +1,38 @@
 /**
  * The page's Content Security Policy, built at start from the list vora.js
- * publishes for the EXACT version the page pins.
+ * publishes for the EXACT version the page pins. A copy of that list is kept in
+ * this sample (`public/csp.json`, next to the page), so the server starts with
+ * no network.
  *
  * Every vora.js version publishes the sources it needs at
  * `https://js.vonpay.com/v<version>/csp.json`, one list for test keys and one
- * for live keys (the card frames and wallet scripts differ). Reading that file
- * for the pinned version keeps the policy and the script tag in step: re-pin
- * the script, restart, and the policy follows.
+ * for live keys (the card frames and wallet scripts differ). The kept copy is
+ * that file, byte for byte, for the pinned version.
  *
  * ⛔ Pinned by hash, like the script. The pinned script tag carries the
  * file's sha384 next to vora.js's own: `data-vora-csp-integrity`, taken from
  * https://js.vonpay.com/integrity.json (`versions["v<version>"].artifacts`,
- * the entry with `role: "csp"`). The fetched bytes are hashed BEFORE they are
+ * the entry with `role: "csp"`). The file's bytes are hashed BEFORE they are
  * parsed, and a different hash stops the start. So a changed or swapped file
  * cannot change this page's policy, even one that looks valid.
  *
- * ⛔ Fails closed. When the file cannot be fetched, does not match the pinned
+ * ⛔ Fails closed. When the file cannot be read, does not match the pinned
  * hash, is not the pinned version's, or holds anything that is not a plain
  * source, `loadVoraCsp` throws and the server must refuse to start. A page
  * served with a guessed policy either breaks the card form or allows more than
  * it should.
  *
- * Re-pinning vora.js: change the version, the script's `integrity` and
- * `data-vora-csp-integrity` together, all three from integrity.json.
+ * Re-pinning vora.js: change the version, the script's `integrity`,
+ * `data-vora-csp-integrity` (all three from integrity.json) and `public/csp.json`
+ * together. Download the file, never edit it:
+ * `curl -o public/csp.json https://js.vonpay.com/v<version>/csp.json`
  *
  * This file is identical in checkout-embedded and funnel-one-click-node.
  */
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 export type KeyMode = "test" | "live";
 
@@ -176,49 +180,52 @@ export function buildPolicy(sources: Record<VoraDirective, string[]>, apiOrigin?
   ].join("; ");
 }
 
+/** The kept copy of the pinned version's list: `csp.json` next to the page. */
+export function cspFileBeside(htmlPath: string): string {
+  return join(dirname(htmlPath), "csp.json");
+}
+
 /**
- * Fetch the pinned version's list, check its bytes against the pinned hash,
- * and build the policy. Throws a message that says what to fix; the caller
+ * Read the kept list, check its bytes against the pinned hash, and build the
+ * policy. No network. Throws a message that says what to fix; the caller
  * refuses to start.
  */
-export async function loadVoraCsp(opts: {
+export function loadVoraCsp(opts: {
   version: string;
   /** The sha384 of the file the page pins (`data-vora-csp-integrity`). */
   cspIntegrity: string;
+  /** The kept copy of the pinned version's csp.json (see cspFileBeside). */
+  cspFile: string;
   mode: KeyMode;
   apiOrigin?: string;
-  fetchImpl?: typeof fetch;
-  timeoutMs?: number;
-}): Promise<string> {
-  const url = voraCspUrl(opts.version);
-  const fetchImpl = opts.fetchImpl ?? fetch;
-  let res: Response;
+}): string {
+  let bytes: Uint8Array;
   try {
-    res = await fetchImpl(url, { signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000) });
+    bytes = readFileSync(opts.cspFile);
   } catch (err) {
-    throw new Error(`could not fetch ${url} (${err instanceof Error ? err.message : String(err)})`);
-  }
-  if (!res.ok) throw new Error(`${url} answered HTTP ${res.status}`);
-  if (!SHA384.test(opts.cspIntegrity)) {
-    throw new Error(`the pinned hash for ${url} is not a sha384 ("${opts.cspIntegrity}")`);
-  }
-  // ⛔ Hash the bytes as served, BEFORE parsing them.
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  const served = sha384Of(bytes);
-  if (served !== opts.cspIntegrity) {
     throw new Error(
-      `${url} does not match the pinned hash: the file is ${served}, the page pins ${opts.cspIntegrity} (data-vora-csp-integrity in public/index.html). Not using it`,
+      `could not read ${opts.cspFile} (${err instanceof Error ? err.message : String(err)}). Download it from ${voraCspUrl(opts.version)}`,
+    );
+  }
+  if (!SHA384.test(opts.cspIntegrity)) {
+    throw new Error(`the pinned hash for ${opts.cspFile} is not a sha384 ("${opts.cspIntegrity}")`);
+  }
+  // ⛔ Hash the bytes as they are, BEFORE parsing them.
+  const found = sha384Of(bytes);
+  if (found !== opts.cspIntegrity) {
+    throw new Error(
+      `${opts.cspFile} does not match the pinned hash: the file is ${found}, the page pins ${opts.cspIntegrity} (data-vora-csp-integrity in public/index.html). Not using it. It must be ${voraCspUrl(opts.version)} byte for byte (an editor or git may have changed its line endings)`,
     );
   }
   let file: unknown;
   try {
     file = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   } catch {
-    throw new Error(`${url} is not valid JSON`);
+    throw new Error(`${opts.cspFile} is not valid JSON`);
   }
   try {
     return buildPolicy(voraSources(file, opts.version, opts.mode), opts.apiOrigin);
   } catch (err) {
-    throw new Error(`${url}: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`${opts.cspFile}: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

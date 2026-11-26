@@ -12,6 +12,10 @@ export interface OrderRecord {
   /** Minor units, exactly as sent to `sessions.create()`. */
   amount: number;
   currency: string;
+  /** When the checkout session stops working (the API's `expiresAt`). Absent or unreadable: the order is never freed. */
+  expiresAt?: string;
+  /** The return page read this session as paid, so the order is never freed, even if its webhook is missing. */
+  seenPaid?: boolean;
   /**
    * Set by the webhook. "needs_review": a payment arrived for a different
    * amount or currency, so a person checks it before anything ships.
@@ -27,11 +31,21 @@ export interface OrderRecord {
 export const CHECKOUT_COOKIE = "vonpay_checkout_ref";
 
 /**
- * ⚠ In memory, so a flood of checkouts grows these maps without limit. At the
- * cap this server refuses new checkouts rather than forget an order someone
- * may be paying. A real app keeps orders in its database.
+ * ⚠ In memory, so a flood of checkouts grows these maps. At the cap this server
+ * first frees old UNPAID orders, then refuses new checkouts rather than forget
+ * an order someone may be paying. The cap protects this process's memory; it is
+ * not a rate limit. A real app keeps orders in its database.
  */
-export const MAX_OPEN_CHECKOUTS = 10_000;
+export const MAX_STORED_CHECKOUTS = 10_000;
+
+/**
+ * How long after its session expired an unpaid order is kept. A payment can
+ * still complete after the session's time limit: the API keeps a payment that
+ * is waiting on the bank open for up to 24 hours past it, and not every late
+ * payment is refunded automatically. Its webhook is then retried for about 79
+ * hours. So about 103 hours, rounded up to five days.
+ */
+export const FREE_AFTER_EXPIRY_MS = 5 * 24 * 60 * 60 * 1000;
 
 const store = globalThis as typeof globalThis & {
   __vonpaySampleOrders?: Map<string, OrderRecord>;
@@ -47,8 +61,34 @@ const sessionByCheckoutRef = (store.__vonpaySampleCheckoutRefs ??= new Map<strin
 export const HANDLED_EVENT_CAP = 10_000;
 const handledEventIds = (store.__vonpaySampleHandledEvents ??= new Set<string>());
 
+/**
+ * Make room by forgetting orders nobody can pay any more: unpaid ("pending" or
+ * "failed"), with a session that expired more than FREE_AFTER_EXPIRY_MS ago.
+ * ⛔ A paid or needs_review order is never freed, whatever its age, nor one the
+ * return page saw paid.
+ */
+export function freeExpiredOrders(now = Date.now()): void {
+  const freed = new Set<string>();
+  for (const [sessionId, order] of ordersBySession) {
+    if ((order.status !== "pending" && order.status !== "failed") || order.seenPaid === true) continue;
+    // An unreadable time is NaN, and no comparison with NaN is true: kept.
+    if (!(Date.parse(order.expiresAt ?? "") + FREE_AFTER_EXPIRY_MS < now)) continue;
+    ordersBySession.delete(sessionId);
+    freed.add(sessionId);
+  }
+  if (freed.size === 0) return;
+  for (const [ref, sessionId] of sessionByCheckoutRef) if (freed.has(sessionId)) sessionByCheckoutRef.delete(ref);
+}
+
+/** Room for one more order. Looks for orders to free only when the store is full. */
+let lastLook = 0;
 export function hasRoomForCheckout(): boolean {
-  return ordersBySession.size < MAX_OPEN_CHECKOUTS;
+  // At most one look a second: while the store is full of recent orders, a look frees nothing.
+  if (ordersBySession.size >= MAX_STORED_CHECKOUTS && Date.now() - lastLook >= 1_000) {
+    lastLook = Date.now();
+    freeExpiredOrders();
+  }
+  return ordersBySession.size < MAX_STORED_CHECKOUTS;
 }
 
 /** Save the order and return the random reference to put in the browser's cookie. */

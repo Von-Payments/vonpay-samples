@@ -53,7 +53,11 @@ if (!webhookSecret || webhookSecret === "whsec_your_endpoint_signing_secret") {
 const baseUrl =
   process.env.VON_PAY_BASE_URL?.replace(/\/+$/, "") ??
   "https://checkout.vonpay.com";
-const vonpay = new VonPayCheckout({ apiKey, baseUrl });
+// Shorter than the SDK's defaults (30 s a try, 2 retries): this client only
+// creates and reads sessions, and a buyer is waiting on each call. ⛔ Do not
+// shorten a client that captures or voids: a timeout there leaves a result
+// nobody knows.
+const vonpay = new VonPayCheckout({ apiKey, baseUrl, timeout: 10_000, maxRetries: 1 });
 
 // Capture the RAW body for the webhook route (a Buffer, byte-faithful) — the
 // HMAC must be computed over the exact bytes Von Payments signed, so this must
@@ -74,6 +78,12 @@ interface OrderRecord {
   orderId: string;
   amount: number; // minor units, exactly as sent to sessions.create()
   currency: string;
+  /** When the checkout session stops working (ms). `undefined`: unknown, so the order is never freed. */
+  expiresAt?: number;
+  /** The cookie reference that names this order, freed together with it. */
+  checkoutRef?: string;
+  /** The return page read this session as paid, so the order is never freed, even if its webhook is missing. */
+  seenPaid?: boolean;
   /**
    * Set by the webhook. "needs_review": a payment arrived for a different
    * amount or currency, so a person checks it before anything ships.
@@ -90,10 +100,44 @@ const ordersBySession = new Map<string, OrderRecord>();
 const CHECKOUT_COOKIE = "vonpay_checkout_ref";
 const sessionByCheckoutRef = new Map<string, string>();
 
-// ⚠ In memory, so a flood of POST /checkout grows these maps without limit.
-// At the cap this server refuses new checkouts (503) rather than forget an
-// order someone may be paying. A real app keeps orders in its database.
-const MAX_OPEN_CHECKOUTS = 10_000;
+// ⚠ In memory, so a flood of POST /checkout grows these maps. At the cap this
+// server first frees old UNPAID orders, then refuses new checkouts (503) rather
+// than forget an order someone may be paying. The cap protects this process's
+// memory; it is not a rate limit. A real app keeps orders in its database.
+const MAX_STORED_CHECKOUTS = 10_000;
+
+// How long after its session expired an unpaid order is kept. A payment can
+// still complete after the session's time limit: the API keeps a payment that
+// is waiting on the bank open for up to 24 hours past it, and not every late
+// payment is refunded automatically. Its webhook is then retried for about 79
+// hours. So about 103 hours, rounded up to five days.
+const FREE_AFTER_EXPIRY_MS = 5 * 24 * 60 * 60 * 1000;
+
+/**
+ * Make room by forgetting orders nobody can pay any more: unpaid ("pending" or
+ * "failed"), with a session that expired more than FREE_AFTER_EXPIRY_MS ago.
+ * ⛔ A paid or needs_review order is never freed, whatever its age, nor one
+ * the return page saw paid.
+ */
+function freeExpiredOrders(now = Date.now()): void {
+  for (const [sessionId, order] of ordersBySession) {
+    if ((order.status !== "pending" && order.status !== "failed") || order.seenPaid === true) continue;
+    if (order.expiresAt === undefined || !(order.expiresAt + FREE_AFTER_EXPIRY_MS < now)) continue;
+    ordersBySession.delete(sessionId);
+    if (order.checkoutRef !== undefined) sessionByCheckoutRef.delete(order.checkoutRef);
+  }
+}
+
+/** Room for one more order. Looks for orders to free only when the store is full. */
+let lastLook = 0;
+function hasRoomForCheckout(): boolean {
+  // At most one look a second: while the store is full of recent orders, a look frees nothing.
+  if (ordersBySession.size >= MAX_STORED_CHECKOUTS && Date.now() - lastLook >= 1_000) {
+    lastLook = Date.now();
+    freeExpiredOrders();
+  }
+  return ordersBySession.size < MAX_STORED_CHECKOUTS;
+}
 
 // Webhook event ids (`vp_evt_*`) already processed to completion. Recorded
 // only AFTER the handler succeeded, so a failed attempt is retried, not
@@ -135,8 +179,8 @@ function readCookie(header: string | undefined, name: string): string | undefine
 // your key, and an open route like this is what card testers look for. This
 // sample has neither.
 app.post("/checkout", async (_req, res) => {
-  if (ordersBySession.size >= MAX_OPEN_CHECKOUTS) {
-    res.status(503).json({ error: "Too many open checkouts. Please try again later." });
+  if (!hasRoomForCheckout()) {
+    res.status(503).json({ error: "Too many checkouts. Please try again later." });
     return;
   }
   // Stand-in for YOUR order id — in a real app, create the order first and use its id.
@@ -158,11 +202,20 @@ app.post("/checkout", async (_req, res) => {
     );
     // Remember which order this session pays for, on YOUR server. The return
     // page looks the order up from this record, never from the URL.
-    ordersBySession.set(session.id, { orderId, amount, currency, status: "pending" });
+    const checkoutRef = randomUUID();
+    const expiresAt = Date.parse(session.expiresAt);
+    ordersBySession.set(session.id, {
+      orderId,
+      amount,
+      currency,
+      status: "pending",
+      checkoutRef,
+      // An unreadable time is "unknown": that order is never freed.
+      ...(Number.isNaN(expiresAt) ? {} : { expiresAt }),
+    });
     // And tie the return to this browser, by a random reference mapped to the
     // session on this server. HttpOnly: page scripts cannot read it.
     // SameSite=Lax: it still comes back on the redirect from checkout.
-    const checkoutRef = randomUUID();
     sessionByCheckoutRef.set(checkoutRef, session.id);
     res.cookie(CHECKOUT_COOKIE, checkoutRef, {
       httpOnly: true,
@@ -227,11 +280,14 @@ app.post("/webhooks", (req, res) => {
     switch (event.type) {
       case "charge.succeeded": {
         // Find YOUR order for this session. No order: not a checkout this
-        // server started (or it restarted and forgot). Acknowledge: a retry
-        // cannot make the order appear.
+        // server started, or one it no longer holds (it restarted, or freed
+        // the order long after its session expired). Acknowledge: a retry
+        // cannot make the order appear. ⚠ The buyer may have paid, so a person
+        // checks it: `sessions.get(session_id)` returns the metadata you set
+        // (`order_id`), then they fulfil or refund it.
         const order = event.data.session_id ? ordersBySession.get(event.data.session_id) : undefined;
         if (!order) {
-          console.warn(`Webhook ${event.type}: no order for this session; nothing fulfilled.`);
+          console.warn(`Webhook ${event.type} ${event.id}: no order for this session; nothing fulfilled. Check this payment by hand.`);
           break;
         }
         // ⛔ A LATE payment that Von Payments already refunded in full: it
@@ -253,7 +309,8 @@ app.post("/webhooks", (req, res) => {
           console.error(`Order ${order.orderId}: paid ${amount} ${currency}, expected ${order.amount} ${order.currency}. Not fulfilled.`);
           break;
         }
-        if (order.status !== "paid") {
+        // Only from pending or failed: an order held for a person stays held.
+        if (order.status === "pending" || order.status === "failed") {
           order.status = "paid";
           // Replace this with your order-fulfillment logic (mark the order row
           // paid, ship, send the receipt). Pass `event.data.transaction_id` to
@@ -344,7 +401,6 @@ app.get("/success", async (req, res) => {
     outcome = await vonpay.sessions.confirmReturn(params, undefined, {
       expectedSuccessUrl: `${appUrl}/success`,
       expectedKeyMode: apiKey.includes("_test_") ? "test" : "live",
-      maxAgeSeconds: 600,
       expectedSessionId: sessionId,
       expectedAmount: order.amount,
       expectedCurrency: order.currency,
@@ -367,6 +423,8 @@ app.get("/success", async (req, res) => {
             "Please refresh in a moment.</p>");
     return;
   }
+
+  if (outcome.paid) order.seenPaid = true;
 
   // Not this order's payment: the return names another session (or none), or
   // the session was for a different amount or currency. Checked before the

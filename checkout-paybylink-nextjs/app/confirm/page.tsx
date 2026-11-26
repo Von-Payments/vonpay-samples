@@ -1,5 +1,6 @@
 import { VonPayCheckout } from "@vonpay/checkout-node";
 import { formatMinorAmount } from "@/lib/money";
+import { readOnce } from "@/lib/confirm-cache";
 import { getLinkBySessionId } from "@/lib/storage";
 
 // Shown when a return cannot be matched to a pay link this server created.
@@ -57,7 +58,9 @@ export default async function ConfirmPage({
     // Constructed INSIDE the try on purpose: the constructor throws when the
     // key is missing, and outside it that becomes a framework 500 for a buyer
     // who has just paid — bypassing the friendly page below.
-    const vonpay = new VonPayCheckout(apiKey);
+    // Shorter than the SDK's defaults (30 s a try, 2 retries): a person is
+    // waiting on this page, and it only reads.
+    const vonpay = new VonPayCheckout({ apiKey, timeout: 10_000, maxRetries: 1 });
     // ⚠️ NO `secret` ARGUMENT, DELIBERATELY. Returns are signed with a
     // PLATFORM-WIDE secret that no merchant holds — holding it would let any
     // merchant forge any other merchant's confirmations. Passing a per-merchant
@@ -65,13 +68,17 @@ export default async function ConfirmPage({
     // that failure renders "invalid signature" to a buyer who just paid.
     // `signatureValid` is `null` here (not checked); the authenticated session
     // read is what answers "did this buyer pay".
-    outcome = await vonpay.sessions.confirmReturn(params, undefined, {
-      expectedSuccessUrl: `${baseUrl}/confirm`,
-      expectedKeyMode: apiKey.includes("_test_") ? "test" : "live",
-      maxAgeSeconds: 600,
-      expectedAmount: link.amount,
-      expectedCurrency: link.currency,
-    });
+    // One read per session for a few seconds, however often this public page is
+    // opened (see lib/confirm-cache.ts).
+    outcome = await readOnce(sessionId, () =>
+      vonpay.sessions.confirmReturn(params, undefined, {
+        expectedSuccessUrl: `${baseUrl}/confirm`,
+        expectedKeyMode: apiKey.includes("_test_") ? "test" : "live",
+        expectedAmount: link.amount,
+        expectedCurrency: link.currency,
+      }),
+    );
+    if (outcome.paid) link.seenPaid = true;
   } catch (err) {
     // Log it: a revoked key would otherwise show every buyer "refresh in a
     // moment" forever with nothing in your logs.

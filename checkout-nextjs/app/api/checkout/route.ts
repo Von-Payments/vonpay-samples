@@ -4,6 +4,11 @@ import { CHECKOUT_COOKIE, hasRoomForCheckout, saveOrder } from "@/lib/orders";
 
 const vonpay = new VonPayCheckout({
   apiKey: process.env.VON_PAY_SECRET_KEY!,
+  // Shorter than the SDK's defaults (30 s a try, 2 retries): this client only
+  // creates sessions, and a buyer is waiting. ⛔ Do not shorten a client that
+  // captures or voids: a timeout there leaves a result nobody knows.
+  timeout: 10_000,
+  maxRetries: 1,
   // Wire your error reporting here. SDK calls this synchronously on
   // sessions.* failures, constructEvent verification failures, and final-
   // retry network errors. Never phones home; passing nothing preserves
@@ -19,7 +24,7 @@ const vonpay = new VonPayCheckout({
 // has neither.
 export async function POST() {
   if (!hasRoomForCheckout()) {
-    return NextResponse.json({ error: "Too many open checkouts. Please try again later." }, { status: 503 });
+    return NextResponse.json({ error: "Too many checkouts. Please try again later." }, { status: 503 });
   }
   // Stand-in for YOUR order id — in a real app, create the order first and use its id.
   const orderId = `order_${crypto.randomUUID()}`;
@@ -42,7 +47,7 @@ export async function POST() {
 
     // Remember which order this session pays for, on YOUR server. The confirm
     // page looks the order up from this record, never from the URL.
-    const checkoutRef = saveOrder(session.id, { orderId, amount, currency, status: "pending" });
+    const checkoutRef = saveOrder(session.id, { orderId, amount, currency, status: "pending", expiresAt: session.expiresAt });
 
     const res = NextResponse.json({ checkoutUrl: session.checkoutUrl });
     // And tie the return to this browser, by a random reference that only this

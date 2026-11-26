@@ -1,9 +1,12 @@
 """Von Payments Checkout — Flask sample app."""
 
 import os
+import time
 import uuid
-from typing import Any, Dict
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 
+import httpx
 from flask import Flask, Response, redirect, request, jsonify
 from flask.typing import ResponseReturnValue
 from markupsafe import escape
@@ -35,7 +38,23 @@ VON_PAY_BASE_URL = (
     os.environ.get("VON_PAY_BASE_URL", "").rstrip("/") or "https://checkout.vonpay.com"
 )
 
-checkout = VonPayCheckout(API_KEY, base_url=VON_PAY_BASE_URL)
+# Shorter than the SDK's defaults (30 s a try, 2 retries): this client only
+# creates and reads sessions, and a buyer is waiting on each call. ⛔ Do not
+# shorten a client that captures or voids: a timeout there leaves a result
+# nobody knows.
+checkout = VonPayCheckout(
+    API_KEY, base_url=VON_PAY_BASE_URL, timeout=10.0, max_retries=1
+)
+
+
+# What a call to the API can raise: the API's answer (VonPayError), or no answer
+# at all (a timeout, a dropped connection), which the SDK passes on from httpx.
+API_ERRORS = (VonPayError, httpx.HTTPError)
+
+
+def _error_name(e: Exception) -> str:
+    """One word for a log line: the API's error code, or the kind of network error."""
+    return e.code if isinstance(e, VonPayError) else type(e).__name__
 
 
 @app.get("/")
@@ -59,10 +78,67 @@ ORDERS_BY_SESSION: Dict[str, Dict[str, Any]] = {}
 CHECKOUT_COOKIE = "vonpay_checkout_ref"
 SESSION_BY_CHECKOUT_REF: Dict[str, str] = {}
 
-# ⚠ In memory, so a flood of POST /checkout grows these maps without limit. At
-# the cap this app refuses new checkouts (503) rather than forget an order
-# someone may be paying. A real app keeps orders in its database.
-MAX_OPEN_CHECKOUTS = 10_000
+# ⚠ In memory, so a flood of POST /checkout grows these maps. At the cap this app
+# first frees old UNPAID orders, then refuses new checkouts (503) rather than
+# forget an order someone may be paying. The cap protects this process's memory;
+# it is not a rate limit. A real app keeps orders in its database.
+MAX_STORED_CHECKOUTS = 10_000
+
+# How long after its session expired an unpaid order is kept. A payment can still
+# complete after the session's time limit: the API keeps a payment that is
+# waiting on the bank open for up to 24 hours past it, and not every late payment
+# is refunded automatically. Its webhook is then retried for about 79 hours. So
+# about 103 hours, rounded up to five days.
+FREE_AFTER_EXPIRY_SECONDS = 5 * 24 * 60 * 60
+
+
+def _expires_at(value: Any) -> Optional[float]:
+    """The session's expiry as a unix time, or None when it cannot be read."""
+    if not isinstance(value, str):
+        return None
+    try:
+        # Python 3.9 and 3.10 do not read a trailing "Z".
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def _free_expired_orders(now: Optional[float] = None) -> None:
+    """Forget orders nobody can pay any more.
+
+    Unpaid ("pending" or "failed"), with a session that expired more than
+    FREE_AFTER_EXPIRY_SECONDS ago. ⛔ A paid or needs_review order is never
+    freed, whatever its age, nor one the return page saw paid, nor one whose
+    expiry is unknown.
+    """
+    now = time.time() if now is None else now
+    for session_id, order in list(ORDERS_BY_SESSION.items()):
+        if order["status"] not in ("pending", "failed") or order.get("seen_paid"):
+            continue
+        expires_at = order.get("expires_at")
+        if expires_at is None or expires_at + FREE_AFTER_EXPIRY_SECONDS >= now:
+            continue
+        ORDERS_BY_SESSION.pop(session_id, None)
+        SESSION_BY_CHECKOUT_REF.pop(order.get("checkout_ref", ""), None)
+
+
+_last_look = float("-inf")
+
+
+def _has_room_for_checkout() -> bool:
+    """Room for one more order. Looks for orders to free only when the store is full.
+
+    At most one look a second: while the store is full of recent orders, a look
+    frees nothing.
+    """
+    global _last_look
+    if len(ORDERS_BY_SESSION) >= MAX_STORED_CHECKOUTS and time.monotonic() - _last_look >= 1:
+        _last_look = time.monotonic()
+        _free_expired_orders()
+    return len(ORDERS_BY_SESSION) < MAX_STORED_CHECKOUTS
 
 # Webhook event ids (``vp_evt_*``) processed to completion. Recorded only AFTER
 # the handler succeeded, so a failed attempt is retried, not dropped. A real
@@ -89,32 +165,42 @@ def _mark_event_handled(event_id: str) -> None:
 # neither.
 @app.post("/checkout")
 def create_checkout():
-    if len(ORDERS_BY_SESSION) >= MAX_OPEN_CHECKOUTS:
-        return jsonify({"error": "Too many open checkouts. Please try again later."}), 503
+    if not _has_room_for_checkout():
+        return jsonify({"error": "Too many checkouts. Please try again later."}), 503
     # Stand-in for YOUR order id — in a real app, create the order first and use its id.
     order_id = f"order_{uuid.uuid4()}"
     amount = 1499
     currency = "USD"
-    session = checkout.sessions.create(
-        amount=amount, currency=currency, country="US",
-        success_url=f"{BASE_URL}/success",
-        metadata={"order_id": order_id},
-        # Key on YOUR order id. Here orderId is made per request, so this only dedupes the SDK's own retry of this call; to dedupe a double-click or refresh, create the order first and reuse its id.
-        idempotency_key=f"session:{order_id}",
-    )
+    try:
+        session = checkout.sessions.create(
+            amount=amount, currency=currency, country="US",
+            success_url=f"{BASE_URL}/success",
+            metadata={"order_id": order_id},
+            # Key on YOUR order id. Here orderId is made per request, so this only dedupes the SDK's own retry of this call; to dedupe a double-click or refresh, create the order first and reuse its id.
+            idempotency_key=f"session:{order_id}",
+        )
+    except API_ERRORS as e:
+        # One line, not a traceback per request. The code only: the API's own
+        # wording is for you, not for the buyer.
+        app.logger.error("Checkout error: %s", _error_name(e))
+        return jsonify({"error": "Failed to create checkout session"}), 500
     # Remember which order this session pays for, on YOUR server. The return
     # page looks the order up from this record, never from the URL.
+    checkout_ref = str(uuid.uuid4())
     ORDERS_BY_SESSION[session.id] = {
         "order_id": order_id,
         "amount": amount,  # minor units, exactly as sent above
         "currency": currency,
         "status": "pending",
+        # When the session stops working (None: unknown, so never freed), and
+        # the cookie reference that is freed together with the order.
+        "expires_at": _expires_at(session.expires_at),
+        "checkout_ref": checkout_ref,
     }
     response = redirect(session.checkout_url)
     # And tie the return to this browser, by a random reference mapped to the
     # session on this server. HttpOnly: page scripts cannot read it.
     # SameSite=Lax: it still comes back on the redirect from checkout.
-    checkout_ref = str(uuid.uuid4())
     SESSION_BY_CHECKOUT_REF[checkout_ref] = session.id
     response.set_cookie(
         CHECKOUT_COOKIE,
@@ -172,9 +258,16 @@ def webhooks() -> ResponseReturnValue:
         order = ORDERS_BY_SESSION.get(session_id) if session_id else None
         if event.type == "charge.succeeded":
             if order is None:
-                # Not a checkout this app started (or it restarted and forgot).
-                # Acknowledge: a retry cannot make the order appear.
-                app.logger.warning("Webhook %s: no order for this session; nothing fulfilled.", event.type)
+                # Not a checkout this app started, or one it no longer holds (it
+                # restarted, or freed the order long after its session expired).
+                # Acknowledge: a retry cannot make the order appear. ⚠ The buyer
+                # may have paid, so a person checks it: `sessions.get(session_id)`
+                # returns the metadata you set (`order_id`), then they fulfil or
+                # refund it.
+                app.logger.warning(
+                    "Webhook %s %s: no order for this session; nothing fulfilled. Check this payment by hand.",
+                    event.type, event.id,
+                )
             elif data.get("late_payment_auto_refunded") is True:
                 # ⛔ A LATE payment that Von Payments already refunded in full:
                 # it arrived after this checkout was closed as not paid, and the
@@ -195,7 +288,8 @@ def webhooks() -> ResponseReturnValue:
                     order["order_id"], data.get("amount"), data.get("currency"),
                     order["amount"], order["currency"],
                 )
-            elif order["status"] != "paid":
+            elif order["status"] in ("pending", "failed"):
+                # Only from pending or failed: an order held for a person stays held.
                 order["status"] = "paid"
                 # Replace this with your order-fulfillment logic (mark the order
                 # row paid, ship, send the receipt). Pass
@@ -284,25 +378,28 @@ def success():
             params,
             expected_success_url=f"{BASE_URL}/success",
             expected_key_mode=expected_mode,
-            max_age_seconds=600,
             expected_session_id=started_session_id,
             expected_amount=order["amount"],
             expected_currency=order["currency"],
         )
-    except VonPayError as e:
+    except API_ERRORS as e:
         # The lookup failed — we could not check. That is NOT "they did not
         # pay", so do not tell the buyer their payment failed.
         #
         # Log it. A revoked key or a rate-limit block would otherwise show every
         # buyer "please refresh in a moment" forever with nothing in your logs —
         # a permanent failure wearing the costume of a temporary one.
-        app.logger.error("Return confirmation failed: %s", e.code)
+        app.logger.error("Return confirmation failed: %s", _error_name(e))
         return (
             "<h1>We could not confirm your payment just now</h1>"
             "<p>No action needed — if you were charged, your order is safe. "
             "Please refresh in a moment.</p>",
             503,
         )
+
+    if outcome.paid:
+        # Never freed from here on, even if its webhook is missing.
+        order["seen_paid"] = True
 
     # Not this order's payment: the return names another session (or none), or
     # the session was for a different amount or currency. Checked before the
@@ -382,7 +479,11 @@ def no_referrer_on_return(response: Response) -> Response:
 
 @app.get("/health")
 def health():
-    result = checkout.health()
+    try:
+        result = checkout.health()
+    except API_ERRORS as e:
+        app.logger.error("Health check failed: %s", _error_name(e))
+        return jsonify({"status": "unreachable"}), 503
     return jsonify({"status": result.status, "latency_ms": result.latency_ms})
 
 

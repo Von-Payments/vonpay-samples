@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import { VonPayCheckout, type MITReason } from "@vonpay/checkout-node";
 import { DEFAULT_TERMS, createApp, termsMentionLaterCharges } from "./app.js";
-import { keyModeOf, loadVoraCsp, pinnedVoraOf } from "./vora-csp.js";
+import { cspFileBeside, keyModeOf, loadVoraCsp, pinnedVoraOf } from "./vora-csp.js";
 
 const SECRET_KEY = process.env.VON_PAY_SECRET_KEY;
 const PUBLISHABLE_KEY = process.env.VON_PAY_PUBLISHABLE_KEY ?? "";
@@ -114,15 +114,18 @@ if (STORED_CREDENTIAL_USE === undefined && termsMentionLaterCharges(DEFAULT_TERM
   );
 }
 
-// The page's Content Security Policy, from vora.js's published list for the
-// version public/index.html pins (checked against the csp.json hash pinned on
-// the same script tag), test or live list by the key's mode. If it cannot be
-// read or does not match, refuse to start: see vora-csp.ts.
+// The page's Content Security Policy, from public/csp.json: the published list
+// for the vora.js version public/index.html pins (checked against the hash
+// pinned on the same script tag), test or live list by the key's mode. No
+// network. If it cannot be read or does not match, refuse to start: see
+// vora-csp.ts.
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "public");
 let contentSecurityPolicy: string;
 try {
-  contentSecurityPolicy = await loadVoraCsp({
-    ...pinnedVoraOf(join(PUBLIC_DIR, "index.html")),
+  const page = join(PUBLIC_DIR, "index.html");
+  contentSecurityPolicy = loadVoraCsp({
+    ...pinnedVoraOf(page),
+    cspFile: cspFileBeside(page),
     mode: keyModeOf(SECRET_KEY || PUBLISHABLE_KEY),
     apiOrigin: API_BASE ? new URL(API_BASE).origin : undefined,
   });
@@ -130,7 +133,7 @@ try {
   // eslint-disable-next-line no-console
   console.error(
     `[funnel-one-click] Could not build the page's Content Security Policy: ${err instanceof Error ? err.message : String(err)}. ` +
-      "The server will not start without it. Check the keys, the network, and that public/index.html pins a published vora.js version.",
+      "The server will not start without it. Check the keys, and that public/csp.json is the file for the vora.js version public/index.html pins.",
   );
   process.exit(2);
 }

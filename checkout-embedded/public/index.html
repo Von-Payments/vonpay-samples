@@ -12,9 +12,9 @@
       (https://js.vonpay.com/integrity.json, key versions["v1.54.1"].sha384).
       data-vora-csp-integrity is the sha384 of that version's csp.json (same
       file, versions["v1.54.1"].artifacts, the entry with role "csp"): the
-      server checks the list it builds its Content Security Policy from
-      against it, and will not start on a mismatch. Change the version and
-      BOTH hashes together when you re-pin.
+      server checks csp.json beside this page, the list it builds its Content
+      Security Policy from, against it, and will not start on a mismatch. Change
+      the version, BOTH hashes and csp.json together when you re-pin.
 
       This is the supported delivery channel for the browser SDK. The script
       attaches a global `Vora` constructor to `window`.

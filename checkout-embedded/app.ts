@@ -46,6 +46,8 @@ export interface AppDeps {
    * caller's word.
    */
   trustProxy?: boolean | number | string;
+  /** Most checkouts kept in memory; at the cap a new one is refused (503). Default 10,000. */
+  maxCheckouts?: number;
   /**
    * The page's full Content-Security-Policy, built at start from vora.js's
    * published list for the pinned version (see vora-csp.ts). Without it the
@@ -58,8 +60,8 @@ export interface AppDeps {
 // The checkout record. A real integration keeps this on its order row; the
 // sample keeps it in memory, keyed by a random id in an httpOnly cookie, so
 // the browser can name ITS checkout but cannot point the server at anyone
-// else's session or payment. (In memory: restarting the server forgets it,
-// and nothing evicts old entries. A dev stub, not something to deploy.)
+// else's session or payment. (In memory: restarting the server forgets it.
+// A dev stub, not something to deploy.)
 // ───────────────────────────────────────────────────────────────────────
 
 interface CheckoutRecord {
@@ -80,6 +82,13 @@ interface CheckoutRecord {
 }
 
 const COOKIE = "embedded_checkout";
+
+// How long after its session expired an unpaid checkout is kept. A payment can
+// still complete after the session's time limit: the API keeps a payment that
+// is waiting on the bank open for up to 24 hours past it, and not every late
+// payment is refunded automatically. Its webhook is then retried for about 79
+// hours. So about 103 hours, rounded up to five days.
+const FREE_AFTER_EXPIRY_MS = 5 * 24 * 60 * 60 * 1000;
 
 type Outcome =
   | "paid" // money captured
@@ -110,11 +119,12 @@ function outcomeForIntent(status: PaymentIntentStatus): Outcome {
 
 /**
  * True only when nothing can be lost by replacing this checkout: its session
- * has expired, and no charge on it succeeded, is running, or has a lost answer.
+ * has expired (more than `marginMs` ago), and no charge on it succeeded, is
+ * running, or has a lost answer.
  */
-function canStartOver(checkout: CheckoutRecord): boolean {
+function canStartOver(checkout: CheckoutRecord, marginMs = 0): boolean {
   const expiresAt = Date.parse(checkout.expiresAt ?? "");
-  if (Number.isNaN(expiresAt) || expiresAt > Date.now()) return false;
+  if (Number.isNaN(expiresAt) || expiresAt + marginMs > Date.now()) return false;
   if (checkout.charging === true || checkout.chargeUnresolved === true) return false;
   return checkout.intentId === undefined || checkout.lastChargeFailed === true;
 }
@@ -124,6 +134,7 @@ export function createApp({
   publishableKey,
   apiBase,
   trustProxy = false,
+  maxCheckouts = 10_000,
   contentSecurityPolicy = "frame-ancestors 'none'",
 }: AppDeps): Express {
   const app = express();
@@ -140,11 +151,21 @@ export function createApp({
   app.use(express.json({ limit: "8kb" }));
 
   const checkouts = new Map<string, CheckoutRecord>();
-  // ⚠ In memory, so a flood of new checkouts grows this map without limit. At
-  // the cap a NEW checkout is refused (503). An old one is never dropped to
-  // make room: it can hold a charge whose answer was lost, and dropping it
-  // would drop the lock that stops a second charge.
-  const MAX_CHECKOUTS = 10_000;
+  // ⚠ In memory, so a flood of new checkouts grows this map. At the cap, old
+  // checkouts that never took money are freed first (see canStartOver), then a
+  // NEW checkout is refused (503). ⛔ One that was paid, is being charged, or
+  // has a charge whose answer was lost is never dropped: dropping it would drop
+  // the lock that stops a second charge. The cap protects this process's
+  // memory; it is not a rate limit.
+  let lastLook = 0;
+  function hasRoomForCheckout(): boolean {
+    // At most one look a second: while the store is full of recent orders, a look frees nothing.
+    if (checkouts.size >= maxCheckouts && Date.now() - lastLook >= 1_000) {
+      lastLook = Date.now();
+      for (const [id, c] of checkouts) if (canStartOver(c, FREE_AFTER_EXPIRY_MS)) checkouts.delete(id);
+    }
+    return checkouts.size < maxCheckouts;
+  }
 
   function readCheckout(req: Request): CheckoutRecord | undefined {
     const header = req.headers.cookie ?? "";
@@ -193,7 +214,7 @@ export function createApp({
       return;
     }
 
-    if (checkouts.size >= MAX_CHECKOUTS) {
+    if (!hasRoomForCheckout()) {
       res.status(503).json({ error: MESSAGES.tooManyCheckouts });
       return;
     }
@@ -365,7 +386,7 @@ export function createApp({
 
 const MESSAGES = {
   sessionNotCreated: "Could not start the checkout. Please try again later.",
-  tooManyCheckouts: "Too many open checkouts. Please try again later.",
+  tooManyCheckouts: "Too many checkouts. Please try again later.",
   previousChargeUnread: "Could not check this checkout's earlier payment. Nothing new was charged. Please try again.",
   chargeRefused: "The payment was not accepted, and the card was not charged. Try again or use another card.",
   chargeUnknown: "We could not confirm whether the card was charged. Please do not pay again.",

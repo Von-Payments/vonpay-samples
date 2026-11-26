@@ -1,0 +1,2 @@
+# csp.json is pinned by hash: never change its bytes, line endings included.
+public/csp.json -text
