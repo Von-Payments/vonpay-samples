@@ -42,7 +42,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { VonPayCheckout } from "@vonpay/checkout-node";
 import { createApp } from "./app.js";
-import { keyModeOf, loadVoraCsp, pinnedVoraOf } from "./vora-csp.js";
+import { cspFileBeside, keyModeOf, loadVoraCsp, pinnedVoraOf } from "./vora-csp.js";
 
 const SECRET_KEY = process.env.VON_PAY_SECRET_KEY;
 const PUBLISHABLE_KEY = process.env.VON_PAY_PUBLISHABLE_KEY;
@@ -105,22 +105,24 @@ const TRUST_PROXY =
       ? Number(TRUST_PROXY_ENV)
       : TRUST_PROXY_ENV;
 
-// The page's Content Security Policy, from vora.js's published list for the
-// version public/index.html pins (checked against the csp.json hash pinned on
-// the same script tag), test or live list by the key's mode. If it cannot be
-// read or does not match, refuse to start: see vora-csp.ts.
+// The page's Content Security Policy, from public/csp.json: the published list
+// for the vora.js version public/index.html pins (checked against the hash
+// pinned on the same script tag), test or live list by the key's mode. No
+// network. If it cannot be read or does not match, refuse to start: see
+// vora-csp.ts.
 let contentSecurityPolicy: string;
 try {
   const page = path.join(path.dirname(fileURLToPath(import.meta.url)), "public", "index.html");
-  contentSecurityPolicy = await loadVoraCsp({
+  contentSecurityPolicy = loadVoraCsp({
     ...pinnedVoraOf(page),
+    cspFile: cspFileBeside(page),
     mode: keyModeOf(SECRET_KEY),
     apiOrigin: API_BASE ? new URL(API_BASE).origin : undefined,
   });
 } catch (err) {
   console.error(
     `Could not build the page's Content Security Policy: ${err instanceof Error ? err.message : String(err)}. ` +
-      "The server will not start without it. Check the network, and that public/index.html pins a published vora.js version.",
+      "The server will not start without it. Check that public/csp.json is the file for the vora.js version public/index.html pins.",
   );
   process.exit(1);
 }

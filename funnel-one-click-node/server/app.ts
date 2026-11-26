@@ -204,6 +204,10 @@ interface OrderRecord {
   /** YOUR customer reference, sent as `buyerId` on the session and every charge. */
   buyerId: string;
   sessionId: string;
+  /** When the session stops working (the API's `expiresAt`). Absent or unreadable: the order is never freed. */
+  expiresAt?: string;
+  /** The consent record is being written, just before a charge: the order is not freed now. */
+  recordingConsent?: boolean;
   /** The words shown at the button. */
   termsShown: string;
   /** When this server first received the charge request (server clock). */
@@ -307,6 +311,20 @@ function sendError(res: Response, label: string, err: unknown): void {
   res.status(502).json({ error: "The result of this payment is not known yet.", outcome_unknown: true });
 }
 
+// How long after its session expired an unpaid order is kept. A payment can
+// still complete after the session's time limit: the API keeps a payment that
+// is waiting on the bank open for up to 24 hours past it, and not every late
+// payment is refunded automatically. Its webhook is then retried for about 79
+// hours. So about 103 hours, rounded up to five days.
+const FREE_AFTER_EXPIRY_MS = 5 * 24 * 60 * 60 * 1000;
+
+/** True only when nothing can be lost by forgetting this order. An unreadable expiry keeps it. */
+function canFree(order: OrderRecord): boolean {
+  const untouched = (s: ChargeState) => s.intentId === undefined && s.charging !== true && s.unresolved !== true;
+  if (order.recordingConsent === true || !untouched(order.main) || !untouched(order.addOn)) return false;
+  return Date.parse(order.expiresAt ?? "") + FREE_AFTER_EXPIRY_MS < Date.now();
+}
+
 const TOKEN_SHAPE = /^vp_pmt_(test|live)_[A-Za-z0-9_-]+$/;
 const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 
@@ -338,6 +356,23 @@ export function createApp({
 
   const termsId = termsVersion(terms);
   const orders = new Map<string, OrderRecord>();
+
+  /**
+   * Room for one more order. At the cap, old orders that never took money are
+   * freed first: the session expired more than FREE_AFTER_EXPIRY_MS ago, and
+   * neither step has a payment, a charge running, or a charge whose answer was
+   * lost. ⛔ Any other order is kept, whatever its age: dropping it would also
+   * drop the lock that stops a second charge on that card.
+   */
+  let lastLook = 0;
+  function hasRoomForOrder(): boolean {
+    // At most one look a second: while the store is full of recent orders, a look frees nothing.
+    if (orders.size >= maxOrders && Date.now() - lastLook >= 1_000) {
+      lastLook = Date.now();
+      for (const [id, order] of orders) if (canFree(order)) orders.delete(id);
+    }
+    return orders.size < maxOrders;
+  }
 
   function readOrder(req: Request): OrderRecord | undefined {
     for (const part of (req.headers.cookie ?? "").split(";")) {
@@ -471,12 +506,10 @@ export function createApp({
    */
   app.post("/api/order", async (req: Request, res: Response) => {
     if (client === null) return res.status(500).json({ error: NO_KEY_ERROR });
-    // ⛔ At the cap, refuse a NEW order. Never drop an old one to make room:
-    // an old order can hold a charge that is running or whose answer was lost,
-    // and dropping it would also drop the lock that stops a second charge on
-    // that card.
-    if (orders.size >= maxOrders) {
-      return res.status(503).json({ error: "Too many open orders. Please try again later." });
+    // ⛔ At the cap, refuse a NEW order. See hasRoomForOrder. The cap protects
+    // this process's memory; it is not a rate limit.
+    if (!hasRoomForOrder()) {
+      return res.status(503).json({ error: "Too many orders. Please try again later." });
     }
     const orderId = `ord_${randomUUID()}`;
     const buyerId = `cus_${randomUUID()}`;
@@ -493,7 +526,7 @@ export function createApp({
         metadata: { sample: "funnel-one-click", order_id: orderId, terms_version: termsId },
       });
       const cookieId = randomUUID();
-      orders.set(cookieId, { orderId, buyerId, sessionId: session.id, termsShown: terms, main: {}, addOn: {} });
+      orders.set(cookieId, { orderId, buyerId, sessionId: session.id, expiresAt: session.expiresAt, termsShown: terms, main: {}, addOn: {} });
       // httpOnly: page scripts cannot read it. sameSite "lax": the bank's
       // redirect back (a cross-site top-level GET) carries it; a cross-site
       // POST does not. Secure over HTTPS, and always in production.
@@ -533,6 +566,7 @@ export function createApp({
     const pressed: unknown = req.body?.pressed_at;
     order.chargeRequestedAt ??= new Date().toISOString();
     // No record, no charge: the record is your evidence of what the shopper agreed to.
+    order.recordingConsent = true;
     try {
       await persistConsentRecord({
         orderId: order.orderId,
@@ -547,6 +581,8 @@ export function createApp({
       // eslint-disable-next-line no-console
       console.error("[funnel-one-click] consent record failed", err instanceof Error ? err.message : String(err));
       return res.status(500).json({ error: "The order could not be recorded. Nothing was charged.", code: "funnel_consent_not_recorded" });
+    } finally {
+      order.recordingConsent = false;
     }
     await chargeOnce(
       res,

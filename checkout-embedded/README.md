@@ -22,9 +22,9 @@ without sending the buyer to a hosted checkout page.
 server.ts            Reads env, builds the Content Security Policy from
                      vora.js's published list, creates the SDK client,
                      starts the server.
-vora-csp.ts          Fetches https://js.vonpay.com/v<pinned>/csp.json, checks
-                     it against the hash pinned in index.html, and builds the
-                     policy; refuses on any failure.
+vora-csp.ts          Reads public/csp.json (the published list, kept here),
+                     checks it against the hash pinned in index.html, and
+                     builds the policy; refuses on any failure. No network.
 app.ts               The routes:
                        GET  /api/config          → publishable key + amount
                        POST /api/create-session  → mints a session (secret key)
@@ -92,7 +92,9 @@ try another payment in this demo, clear the `embedded_checkout` cookie or
 restart the server.
 
 `POST /api/create-session` is a dev stub. It needs no sign-in, and it adds an
-entry to an in-memory map that nothing ever removes. Two things must change
+entry to an in-memory map. At 10,000 entries, checkouts that took no money and
+whose session expired more than 5 days ago are freed, then a new one is
+refused (`503`). The cap protects memory; it is not a rate limit. Two things must change
 before you deploy:
 
 - **Key the session on your own order id.** The cookie protects one browser
@@ -189,10 +191,16 @@ published hash:
 
 `data-vora-csp-integrity` is the hash of the same version's `csp.json`, the
 list the server builds its Content Security Policy from (see Security notes).
-The server checks the file it fetches against it and will not start on a
-mismatch.
+The server checks its kept copy, `public/csp.json`, against it and will not
+start on a mismatch.
 
-To move to a newer version, change three values together, all from
+To move to a newer version, download its list (never edit the file):
+
+```bash
+curl -o public/csp.json https://js.vonpay.com/vX.Y.Z/csp.json
+```
+
+and change three values together, all from
 [`js.vonpay.com/integrity.json`](https://js.vonpay.com/integrity.json)
 (the newest release is named under `channels.v1.current`):
 
@@ -201,9 +209,9 @@ To move to a newer version, change three values together, all from
 3. `data-vora-csp-integrity`: the `sha384` of the entry in
    `versions["vX.Y.Z"].artifacts` whose `role` is `"csp"`.
 
-Then restart the server. A new version needs a new vora.js hash AND a new
-`csp.json` hash: with only one changed, the browser refuses the script or the
-server refuses to start.
+Then restart the server. A new version needs a new vora.js hash, a new
+`csp.json` hash AND the new `csp.json`: with only some changed, the browser
+refuses the script or the server refuses to start.
 
 The auto-updating `/v1/` channel is a stated choice, not the default. It ships
 new builds to your page without a change on your side, so it cannot carry an
@@ -215,7 +223,7 @@ new builds to your page without a change on your side, so it cannot carry an
 
 ## Security notes
 
-- **Content Security Policy, built at start.** Every vora.js version publishes the sources it needs at `https://js.vonpay.com/v<version>/csp.json`, with one list for test keys and one for live keys. At start, the server reads the version `public/index.html` pins, fetches that file, checks its bytes against the sha384 pinned on the same script tag (`data-vora-csp-integrity`, before it reads the file), picks the list for the key's mode, and adds the page's own needs (`'self'`, no plugins, no framing by other sites). The result goes on every response from `app.ts` (`vora-csp.ts`). When you re-pin vora.js, restart: the policy follows the new version. If the file cannot be fetched, does not match the pinned hash (the message names both hashes), is for another version, or holds anything that is not a plain source, the server refuses to start and says why. The same goes for a keyword that turns off a protection (`'unsafe-inline'`, `'unsafe-eval'` and the like) anywhere but `'unsafe-inline'` in `style-src`, whatever the file says: the payment form and Google Pay add a `<style>` element, and nothing needs inline or eval'd script. A guessed policy would either break the card form or allow more than it should. Scripts are limited to this site and the sources in that list: no inline scripts.
+- **Content Security Policy, built at start.** Every vora.js version publishes the sources it needs at `https://js.vonpay.com/v<version>/csp.json`, with one list for test keys and one for live keys. This sample keeps that file, byte for byte, as `public/csp.json`, so the server starts with no network. At start, the server reads the version `public/index.html` pins, reads the kept file, checks its bytes against the sha384 pinned on the same script tag (`data-vora-csp-integrity`, before it reads the file), picks the list for the key's mode, and adds the page's own needs (`'self'`, no plugins, no framing by other sites). The result goes on every response from `app.ts` (`vora-csp.ts`). When you re-pin vora.js, replace the file and restart. If the file cannot be read, does not match the pinned hash (the message names both hashes), is for another version, or holds anything that is not a plain source, the server refuses to start and says why. The same goes for a keyword that turns off a protection (`'unsafe-inline'`, `'unsafe-eval'` and the like) anywhere but `'unsafe-inline'` in `style-src`, whatever the file says: the payment form and Google Pay add a `<style>` element, and nothing needs inline or eval'd script. A guessed policy would either break the card form or allow more than it should. Scripts are limited to this site and the sources in that list: no inline scripts.
 - **Two keys, two scopes.** The secret key (`vp_sk_*`) stays on the server
   and creates sessions / charges tokens. The publishable key (`vp_pk_*`) is
   safe in the browser - it can only authenticate VORA's public endpoints,

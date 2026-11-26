@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { VonPayCheckout } from "@vonpay/checkout-node";
 import { getTenant, getTenantCredentials } from "@/lib/tenants";
 import { getCustomer } from "@/lib/customers";
-import { getOrderBySession, hasRoomForOrder, saveOrder } from "@/lib/orders";
+import { getOrderById, getOrderBySession, hasRoomForOrder, saveOrder } from "@/lib/orders";
 
 // The shape the tenant page mints: `ord_` + a random (v4) UUID. Anything else
 // is refused rather than used as a key, so a missing or free-form value can
@@ -67,8 +67,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "tenant_credentials_missing" }, { status: 500 });
   }
 
-  if (!hasRoomForOrder()) {
-    return NextResponse.json({ error: "too_many_open_orders" }, { status: 503 });
+  // A repeat of an order already stored needs no room (the key below returns its
+  // session again), so it is never refused for room.
+  if (!hasRoomForOrder(tenantId) && getOrderById(tenantId, orderId) === undefined) {
+    return NextResponse.json({ error: "too_many_orders" }, { status: 503 });
   }
 
   const baseUrl = process.env.BASE_URL ?? new URL(req.url).origin;
@@ -77,6 +79,11 @@ export async function POST(req: NextRequest) {
     // Pin the API version. The platform's adapter contract changes
     // when this changes — leave it explicit, don't track latest.
     apiVersion: "2026-05-05",
+    // Shorter than the SDK's defaults (30 s a try, 2 retries): this client only
+    // creates sessions. ⛔ Do not shorten a client that captures or voids: a
+    // timeout there leaves a result nobody knows.
+    timeout: 10_000,
+    maxRetries: 1,
   });
 
   // Idempotency-Key — every connector should send one. Key it on the ORDER:
@@ -137,6 +144,7 @@ export async function POST(req: NextRequest) {
       customerId: customer.id,
       amount: customer.chargeAmount,
       currency: customer.currency,
+      expiresAt: session.expiresAt,
     });
 
     // 303 See Other ensures the browser GETs the checkoutUrl after a POST.

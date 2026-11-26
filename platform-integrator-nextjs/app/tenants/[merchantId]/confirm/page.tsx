@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { VonPayCheckout } from "@vonpay/checkout-node";
 import { getTenant, getTenantCredentials } from "@/lib/tenants";
+import { readOnce } from "@/lib/confirm-cache";
 import { getOrderBySession } from "@/lib/orders";
 import { formatMinorAmount } from "@/lib/money";
 
@@ -56,7 +57,9 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
     // Constructed INSIDE the try: the constructor throws on a missing or
     // malformed tenant key, and outside it that becomes a framework 500 for a
     // buyer who has just paid — bypassing the friendly page below.
-    const vonpay = new VonPayCheckout(vpSk);
+    // Shorter than the SDK's defaults (30 s a try, 2 retries): a person is
+    // waiting on this page, and it only reads.
+    const vonpay = new VonPayCheckout({ apiKey: vpSk, timeout: 10_000, maxRetries: 1 });
     // ⚠️ NO `secret` ARGUMENT, DELIBERATELY. Returns are signed with a
     // PLATFORM-WIDE secret that no merchant holds — holding it would let any
     // merchant forge any other merchant's confirmations. Passing a per-merchant
@@ -64,13 +67,20 @@ export default async function ConfirmPage({ params, searchParams }: Props) {
     // that failure renders "invalid signature" to a buyer who just paid.
     // `signatureValid` is `null` here (not checked); the authenticated session
     // read is what answers "did this buyer pay".
-    outcome = await vonpay.sessions.confirmReturn(params2, undefined, {
-      expectedSuccessUrl: `${baseUrl}/tenants/${merchantId}/confirm`,
-      expectedKeyMode: vpSk.includes("_test_") ? "test" : "live",
-      maxAgeSeconds: 600,
-      expectedAmount: order.amount,
-      expectedCurrency: order.currency,
-    });
+    // One read per session for a few seconds, however often this public page is
+    // opened (see lib/confirm-cache.ts). Keyed on the tenant too: its own key
+    // makes the read.
+    outcome = await readOnce(`${merchantId} ${returnedSession}`, () =>
+      vonpay.sessions.confirmReturn(params2, undefined, {
+        expectedSuccessUrl: `${baseUrl}/tenants/${merchantId}/confirm`,
+        expectedKeyMode: vpSk.includes("_test_") ? "test" : "live",
+        expectedAmount: order.amount,
+        expectedCurrency: order.currency,
+      }),
+    );
+    // Never freed from here on, even if its webhook is missing. This page never
+    // sets the order's status: the webhook decides that.
+    if (outcome.paid) order.seenPaid = true;
   } catch (err) {
     // Log it: a revoked tenant key would otherwise show every one of that
     // tenant's buyers a soft error forever, with nothing in your logs.

@@ -25,6 +25,8 @@ export default function LinkStatusPoller({ id, amount, currency, initial }: Prop
   // Keep polling after `paid`: a refund or a second payment can still arrive.
   useEffect(() => {
     const interval = setInterval(async () => {
+      // A tab nobody is looking at asks for nothing; the next tick after it is shown does.
+      if (document.hidden) return;
       try {
         const res = await fetch(`/api/links/${id}`, { cache: "no-store" });
         if (!res.ok) return;

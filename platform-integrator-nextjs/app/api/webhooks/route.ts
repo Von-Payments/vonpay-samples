@@ -262,9 +262,12 @@ export async function POST(req: NextRequest) {
       // Buyer actually paid. Find the order on YOUR side, for THIS tenant only.
       const order = orderOfTenant(tenant.id, event.data.session_id);
       if (!order) {
-        // Not an order this tenant created here: do not touch anything. Still
-        // ack (200), since a redelivery cannot change the answer.
-        console.warn(`[${tenant.name}] ${event.type} for no order of this tenant — ignored`);
+        // Not an order this tenant created here, or one this server no longer
+        // holds (it restarted, or freed the order long after its session
+        // expired): do not touch anything. Still ack (200), since a redelivery
+        // cannot change the answer. ⚠ The buyer may have paid, so a person
+        // checks the payment and fulfils or refunds it.
+        console.warn(`[${tenant.name}] ${event.type} ${event.id} for no order of this tenant — ignored; check this payment by hand`);
         break;
       }
       // ⛔ A LATE payment that Von Payments already refunded in full: it
@@ -283,6 +286,7 @@ export async function POST(req: NextRequest) {
         (typeof amount === "number" && amount !== order.amount) ||
         (typeof currency === "string" && currency.toUpperCase() !== order.currency.toUpperCase())
       ) {
+        order.status = "needs_review";
         console.error(`[${tenant.name}] order ${order.orderId} paid ${amount} ${currency}, expected ${order.amount} ${order.currency}: held for review`);
         break;
       }
@@ -290,6 +294,8 @@ export async function POST(req: NextRequest) {
       // downstream effects (fulfillment, receipt, etc.).
       // `event.data.transaction_id` is available here; pass it to your
       // systems but avoid logging it verbatim.
+      // Only from unpaid or failed: an order held for a person stays held.
+      if (order.status === undefined || order.status === "failed") order.status = "paid";
       console.log(`[${tenant.name}] order ${order.orderId} paid`);
       break;
     }
@@ -303,6 +309,8 @@ export async function POST(req: NextRequest) {
       }
       // Update your CRM's `orders` row → status=failed and surface it in your
       // platform UI. `event.data.failure_reason` is the buyer-safe explanation.
+      // ⛔ A failure never undoes a payment: events arrive out of order.
+      order.status ??= "failed";
       console.log(`[${tenant.name}] order ${order.orderId} failed`);
       break;
     }

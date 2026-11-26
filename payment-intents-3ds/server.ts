@@ -54,6 +54,12 @@ if (!apiKey) {
   process.exit(2);
 }
 
+// ⛔ Test keys only: there is no sign-in, and /charge charges a saved card.
+if (!apiKey.startsWith("vp_sk_test_")) {
+  console.error("This sample runs on a test key only (vp_sk_test_…). It has no sign-in.");
+  process.exit(2);
+}
+
 // Per-endpoint webhook signing secret (whsec_…), shown ONCE when you create the
 // webhook endpoint in the dashboard. This is NOT your API key — verifying with
 // the API key will fail against real deliveries.
@@ -185,8 +191,10 @@ interface Order {
 }
 type CaptureResult = PaymentIntent | "refused" | "retry_later" | "unknown";
 const orders = new Map<string, Order>();
-// ⚠ At the cap a NEW order is refused (503). An old one is never dropped to
-// make room: it can hold money, or a capture whose answer was lost.
+// ⚠ At the cap a NEW order is refused (503) until a restart. Nothing is freed:
+// an order can hold money, or a capture whose answer was lost, and it has no
+// checkout session, so there is no expiry that says nobody can pay it any more.
+// The cap protects this process's memory; it is not a rate limit.
 const MAX_ORDERS = 10_000;
 const hasRoomForOrder = (): boolean => orders.size < MAX_ORDERS;
 
@@ -696,6 +704,7 @@ app.get("/", (req, res) => {
       "There is no sign-in: anyone who can reach this server can charge the saved",
       "card in VON_PAY_PAYMENT_METHOD. A real app charges the signed-in buyer's own",
       "card, looked up on the server.</p>",
+      "<p>Orders are kept in memory and never removed: at 10,000 a new one is refused until a restart.</p>",
       "<p>Click pay to create a manual-capture intent with the saved card in",
       "VON_PAY_PAYMENT_METHOD. If the bank challenges, the server redirects",
       "you to the issuer challenge, then confirms the outcome from the webhook.</p>",
@@ -711,7 +720,8 @@ app.get("/", (req, res) => {
   );
 });
 
-app.listen(port, () => {
+// This machine only: there is no sign-in here.
+app.listen(port, "127.0.0.1", () => {
   console.warn(
     "⚠ Unauthenticated demo: anyone who can reach this server can charge the saved card in VON_PAY_PAYMENT_METHOD. Test keys only, on your own machine.",
   );

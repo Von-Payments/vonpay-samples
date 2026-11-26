@@ -116,11 +116,14 @@ export async function POST(req: NextRequest) {
     switch (event.type) {
       case "charge.succeeded": {
         // Find YOUR order for this session. No order: not a checkout this
-        // server started (or it restarted and forgot). Acknowledge: a retry
-        // cannot make the order appear.
+        // server started, or one it no longer holds (it restarted, or freed
+        // the order long after its session expired). Acknowledge: a retry
+        // cannot make the order appear. ⚠ The buyer may have paid, so a person
+        // checks it: `sessions.get(session_id)` returns the metadata you set
+        // (`order_id`), then they fulfil or refund it.
         const order = event.data.session_id ? getOrderBySession(event.data.session_id) : undefined;
         if (!order) {
-          console.warn(`Webhook ${event.type}: no order for this session; nothing fulfilled.`);
+          console.warn(`Webhook ${event.type} ${event.id}: no order for this session; nothing fulfilled. Check this payment by hand.`);
           break;
         }
         // ⛔ A LATE payment that Von Payments already refunded in full: it
@@ -142,7 +145,8 @@ export async function POST(req: NextRequest) {
           console.error(`Order ${order.orderId}: paid ${amount} ${currency}, expected ${order.amount} ${order.currency}. Not fulfilled.`);
           break;
         }
-        if (order.status !== "paid") {
+        // Only from pending or failed: an order held for a person stays held.
+        if (order.status === "pending" || order.status === "failed") {
           order.status = "paid";
           // Replace this with your order-fulfillment logic (mark the order row
           // paid, ship, send the receipt). Pass `event.data.transaction_id` to

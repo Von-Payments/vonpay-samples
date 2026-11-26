@@ -1,0 +1,537 @@
+{
+  "version": "1.54.1",
+  "modes": {
+    "test": {
+      "version": "1.54.1",
+      "mode": "test",
+      "directives": {
+        "script-src": [
+          "https://js.vonpay.com",
+          "https://applepay.cdn-apple.com",
+          "https://pay.google.com",
+          "https://js.stripe.com",
+          "https://*.js.stripe.com"
+        ],
+        "frame-src": [
+          "https://secure-fields.sandbox.vonpay.gr4vy.app",
+          "https://js.vonpay.com",
+          "https://embed.sandbox.vonpay.gr4vy.app",
+          "https://embed.sandbox.portal.vonpay.com",
+          "https://applepay.cdn-apple.com",
+          "https://pay.sandbox.google.com",
+          "https://checkout.vonpay.com",
+          "https://hooks.stripe.com",
+          "'self'",
+          "https://js.stripe.com",
+          "https://*.js.stripe.com",
+          "https://link.com",
+          "https://*.link.com"
+        ],
+        "connect-src": [
+          "https://checkout.vonpay.com",
+          "https://smp-paymentservices.apple.com",
+          "https://api.stripe.com",
+          "https://link.com",
+          "https://*.link.com"
+        ],
+        "img-src": [
+          "https://cdn.sandbox.vonpay.gr4vy.app",
+          "https://www.gstatic.com",
+          "https://*.link.com"
+        ],
+        "style-src": [
+          "'unsafe-inline'"
+        ],
+        "font-src": [
+          "https://applepay.cdn-apple.com"
+        ]
+      },
+      "sources": [
+        {
+          "directive": "script-src",
+          "source": "https://js.vonpay.com",
+          "feature": "always",
+          "why": "vora.js and the chunks it imports on demand."
+        },
+        {
+          "directive": "connect-src",
+          "source": "https://checkout.vonpay.com",
+          "feature": "always",
+          "why": "The Vora API, including the payment event stream."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://secure-fields.sandbox.vonpay.gr4vy.app",
+          "feature": "card-fields",
+          "why": "The card-field frames, and the 3-D Secure frame they open."
+        },
+        {
+          "directive": "img-src",
+          "source": "https://cdn.sandbox.vonpay.gr4vy.app",
+          "feature": "card-fields",
+          "why": "Card-brand icons next to the card-number field."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://js.vonpay.com",
+          "feature": "bot-check",
+          "why": "The hidden payment-verification frame, only when the optional bot check is switched on for your account."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://embed.sandbox.vonpay.gr4vy.app",
+          "feature": "payment-form",
+          "why": "The payment form frame."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://embed.sandbox.portal.vonpay.com",
+          "feature": "payment-form",
+          "why": "The payment form frame on the Vonpay domain, for accounts set up that way."
+        },
+        {
+          "directive": "style-src",
+          "source": "'unsafe-inline'",
+          "feature": "payment-form",
+          "why": "The payment form adds a <style> element to your page for its layout."
+        },
+        {
+          "directive": "script-src",
+          "source": "https://applepay.cdn-apple.com",
+          "feature": "apple-pay",
+          "why": "Apple Pay JS, which the full payment form loads outside Safari."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://applepay.cdn-apple.com",
+          "feature": "apple-pay",
+          "why": "The Apple Pay code sheet Apple Pay JS opens outside Safari."
+        },
+        {
+          "directive": "connect-src",
+          "source": "https://smp-paymentservices.apple.com",
+          "feature": "apple-pay",
+          "why": "Apple Pay JS checks the merchant registration outside Safari."
+        },
+        {
+          "directive": "font-src",
+          "source": "https://applepay.cdn-apple.com",
+          "feature": "apple-pay",
+          "why": "Fonts Apple Pay JS loads from Apple's CDN outside Safari."
+        },
+        {
+          "directive": "script-src",
+          "source": "https://pay.google.com",
+          "feature": "google-pay",
+          "why": "Google Pay JS, loaded when the Google Pay button is requested."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://pay.sandbox.google.com",
+          "feature": "google-pay",
+          "why": "The Google Pay button and payment sheet frames."
+        },
+        {
+          "directive": "img-src",
+          "source": "https://www.gstatic.com",
+          "feature": "google-pay",
+          "why": "Google Pay button artwork."
+        },
+        {
+          "directive": "style-src",
+          "source": "'unsafe-inline'",
+          "feature": "google-pay",
+          "why": "Google Pay JS adds a <style> element for its button."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://embed.sandbox.vonpay.gr4vy.app",
+          "feature": "wallet-modal",
+          "why": "The bank check for a wallet payment, in a modal on your page."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://checkout.vonpay.com",
+          "feature": "wallet-modal",
+          "why": "The page that reports the wallet bank check's result back to vora.js."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://embed.sandbox.vonpay.gr4vy.app",
+          "feature": "bank-check",
+          "why": "The card-update bank check pop-up."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://hooks.stripe.com",
+          "feature": "bank-check",
+          "why": "The same, on Stripe."
+        },
+        {
+          "directive": "frame-src",
+          "source": "'self'",
+          "feature": "bank-check",
+          "why": "Your return page."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://embed.sandbox.vonpay.gr4vy.app",
+          "feature": "next-action",
+          "why": "The bank check for a payment your server created."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://hooks.stripe.com",
+          "feature": "next-action",
+          "why": "The same, on Stripe."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://checkout.vonpay.com",
+          "feature": "next-action",
+          "why": "Checkout's return page for it."
+        },
+        {
+          "directive": "script-src",
+          "source": "https://js.stripe.com",
+          "feature": "stripe",
+          "why": "Stripe.js."
+        },
+        {
+          "directive": "script-src",
+          "source": "https://*.js.stripe.com",
+          "feature": "stripe",
+          "why": "Stripe.js, from its per-feature origins."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://js.stripe.com",
+          "feature": "stripe",
+          "why": "Stripe card-field and wallet frames."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://*.js.stripe.com",
+          "feature": "stripe",
+          "why": "Stripe frames, from their per-feature origins."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://hooks.stripe.com",
+          "feature": "stripe",
+          "why": "Stripe's 3-D Secure frame."
+        },
+        {
+          "directive": "connect-src",
+          "source": "https://api.stripe.com",
+          "feature": "stripe",
+          "why": "The Stripe API."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://link.com",
+          "feature": "stripe-link",
+          "why": "Link sign-in."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://*.link.com",
+          "feature": "stripe-link",
+          "why": "Link sign-in."
+        },
+        {
+          "directive": "connect-src",
+          "source": "https://link.com",
+          "feature": "stripe-link",
+          "why": "Link."
+        },
+        {
+          "directive": "connect-src",
+          "source": "https://*.link.com",
+          "feature": "stripe-link",
+          "why": "Link."
+        },
+        {
+          "directive": "img-src",
+          "source": "https://*.link.com",
+          "feature": "stripe-link",
+          "why": "Link artwork."
+        }
+      ],
+      "ifNoUnsafeInline": [
+        {
+          "directive": "style-src",
+          "source": "'sha256-OuajJxe804doBGkJvwnBjnP1cpvNWFjHltumC6RbkcA='",
+          "feature": "default-look",
+          "why": "A one-line style element (@layer vora-defaults;) that puts the built-in default look below your own CSS layers. Without it the look still works, but your layered CSS (Tailwind v4 and similar) does not override it."
+        }
+      ]
+    },
+    "live": {
+      "version": "1.54.1",
+      "mode": "live",
+      "directives": {
+        "script-src": [
+          "https://js.vonpay.com",
+          "https://applepay.cdn-apple.com",
+          "https://pay.google.com",
+          "https://js.stripe.com",
+          "https://*.js.stripe.com"
+        ],
+        "frame-src": [
+          "https://secure-fields.vonpay.gr4vy.app",
+          "https://js.vonpay.com",
+          "https://embed.vonpay.gr4vy.app",
+          "https://embed.portal.vonpay.com",
+          "https://applepay.cdn-apple.com",
+          "https://pay.google.com",
+          "https://checkout.vonpay.com",
+          "https://hooks.stripe.com",
+          "'self'",
+          "https://js.stripe.com",
+          "https://*.js.stripe.com",
+          "https://link.com",
+          "https://*.link.com"
+        ],
+        "connect-src": [
+          "https://checkout.vonpay.com",
+          "https://smp-paymentservices.apple.com",
+          "https://api.stripe.com",
+          "https://link.com",
+          "https://*.link.com"
+        ],
+        "img-src": [
+          "https://cdn.vonpay.gr4vy.app",
+          "https://www.gstatic.com",
+          "https://*.link.com"
+        ],
+        "style-src": [
+          "'unsafe-inline'"
+        ],
+        "font-src": [
+          "https://applepay.cdn-apple.com"
+        ]
+      },
+      "sources": [
+        {
+          "directive": "script-src",
+          "source": "https://js.vonpay.com",
+          "feature": "always",
+          "why": "vora.js and the chunks it imports on demand."
+        },
+        {
+          "directive": "connect-src",
+          "source": "https://checkout.vonpay.com",
+          "feature": "always",
+          "why": "The Vora API, including the payment event stream."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://secure-fields.vonpay.gr4vy.app",
+          "feature": "card-fields",
+          "why": "The card-field frames, and the 3-D Secure frame they open."
+        },
+        {
+          "directive": "img-src",
+          "source": "https://cdn.vonpay.gr4vy.app",
+          "feature": "card-fields",
+          "why": "Card-brand icons next to the card-number field."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://js.vonpay.com",
+          "feature": "bot-check",
+          "why": "The hidden payment-verification frame, only when the optional bot check is switched on for your account."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://embed.vonpay.gr4vy.app",
+          "feature": "payment-form",
+          "why": "The payment form frame."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://embed.portal.vonpay.com",
+          "feature": "payment-form",
+          "why": "The payment form frame on the Vonpay domain, for accounts set up that way."
+        },
+        {
+          "directive": "style-src",
+          "source": "'unsafe-inline'",
+          "feature": "payment-form",
+          "why": "The payment form adds a <style> element to your page for its layout."
+        },
+        {
+          "directive": "script-src",
+          "source": "https://applepay.cdn-apple.com",
+          "feature": "apple-pay",
+          "why": "Apple Pay JS, which the full payment form loads outside Safari."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://applepay.cdn-apple.com",
+          "feature": "apple-pay",
+          "why": "The Apple Pay code sheet Apple Pay JS opens outside Safari."
+        },
+        {
+          "directive": "connect-src",
+          "source": "https://smp-paymentservices.apple.com",
+          "feature": "apple-pay",
+          "why": "Apple Pay JS checks the merchant registration outside Safari."
+        },
+        {
+          "directive": "font-src",
+          "source": "https://applepay.cdn-apple.com",
+          "feature": "apple-pay",
+          "why": "Fonts Apple Pay JS loads from Apple's CDN outside Safari."
+        },
+        {
+          "directive": "script-src",
+          "source": "https://pay.google.com",
+          "feature": "google-pay",
+          "why": "Google Pay JS, loaded when the Google Pay button is requested."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://pay.google.com",
+          "feature": "google-pay",
+          "why": "The Google Pay button and payment sheet frames."
+        },
+        {
+          "directive": "img-src",
+          "source": "https://www.gstatic.com",
+          "feature": "google-pay",
+          "why": "Google Pay button artwork."
+        },
+        {
+          "directive": "style-src",
+          "source": "'unsafe-inline'",
+          "feature": "google-pay",
+          "why": "Google Pay JS adds a <style> element for its button."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://embed.vonpay.gr4vy.app",
+          "feature": "wallet-modal",
+          "why": "The bank check for a wallet payment, in a modal on your page."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://checkout.vonpay.com",
+          "feature": "wallet-modal",
+          "why": "The page that reports the wallet bank check's result back to vora.js."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://embed.vonpay.gr4vy.app",
+          "feature": "bank-check",
+          "why": "The card-update bank check pop-up."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://hooks.stripe.com",
+          "feature": "bank-check",
+          "why": "The same, on Stripe."
+        },
+        {
+          "directive": "frame-src",
+          "source": "'self'",
+          "feature": "bank-check",
+          "why": "Your return page."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://embed.vonpay.gr4vy.app",
+          "feature": "next-action",
+          "why": "The bank check for a payment your server created."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://hooks.stripe.com",
+          "feature": "next-action",
+          "why": "The same, on Stripe."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://checkout.vonpay.com",
+          "feature": "next-action",
+          "why": "Checkout's return page for it."
+        },
+        {
+          "directive": "script-src",
+          "source": "https://js.stripe.com",
+          "feature": "stripe",
+          "why": "Stripe.js."
+        },
+        {
+          "directive": "script-src",
+          "source": "https://*.js.stripe.com",
+          "feature": "stripe",
+          "why": "Stripe.js, from its per-feature origins."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://js.stripe.com",
+          "feature": "stripe",
+          "why": "Stripe card-field and wallet frames."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://*.js.stripe.com",
+          "feature": "stripe",
+          "why": "Stripe frames, from their per-feature origins."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://hooks.stripe.com",
+          "feature": "stripe",
+          "why": "Stripe's 3-D Secure frame."
+        },
+        {
+          "directive": "connect-src",
+          "source": "https://api.stripe.com",
+          "feature": "stripe",
+          "why": "The Stripe API."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://link.com",
+          "feature": "stripe-link",
+          "why": "Link sign-in."
+        },
+        {
+          "directive": "frame-src",
+          "source": "https://*.link.com",
+          "feature": "stripe-link",
+          "why": "Link sign-in."
+        },
+        {
+          "directive": "connect-src",
+          "source": "https://link.com",
+          "feature": "stripe-link",
+          "why": "Link."
+        },
+        {
+          "directive": "connect-src",
+          "source": "https://*.link.com",
+          "feature": "stripe-link",
+          "why": "Link."
+        },
+        {
+          "directive": "img-src",
+          "source": "https://*.link.com",
+          "feature": "stripe-link",
+          "why": "Link artwork."
+        }
+      ],
+      "ifNoUnsafeInline": [
+        {
+          "directive": "style-src",
+          "source": "'sha256-OuajJxe804doBGkJvwnBjnP1cpvNWFjHltumC6RbkcA='",
+          "feature": "default-look",
+          "why": "A one-line style element (@layer vora-defaults;) that puts the built-in default look below your own CSS layers. Without it the look still works, but your layered CSS (Tailwind v4 and similar) does not override it."
+        }
+      ]
+    }
+  }
+}

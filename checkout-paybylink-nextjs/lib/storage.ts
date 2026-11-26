@@ -35,6 +35,8 @@ export interface PayLink {
   status: LinkStatus;
   createdAt: string;
   expiresAt: string;
+  /** The confirm page read this link's session as paid, so it is never freed, even if its webhook is missing. */
+  seenPaid?: boolean;
   /** The payment that paid this link. */
   transactionId?: string;
   /** Refunded so far on `transactionId`, in minor units. */
@@ -56,13 +58,44 @@ const holder = globalThis as typeof globalThis & {
 const store = (holder.__vonpaySamplePayLinks ??= new Map<string, PayLink>());
 
 /**
- * ⚠ In memory, so a flood of new links grows the store without limit. At the
- * cap `POST /api/links` refuses a new link (503) rather than forget one a buyer
- * may be paying. A real app keeps links in its database.
+ * ⚠ In memory, so a flood of new links grows the store. At the cap
+ * `POST /api/links` first frees old UNPAID links, then refuses a new link (503)
+ * rather than forget one a buyer may be paying. The cap protects this process's
+ * memory; it is not a rate limit. A real app keeps links in its database.
  */
 export const MAX_LINKS = 10_000;
 
+/**
+ * How long after its session expired an unpaid link is kept. A payment can
+ * still complete after the session's time limit: the API keeps a payment that
+ * is waiting on the bank open for up to 24 hours past it, and not every late
+ * payment is refunded automatically. Its webhook is then retried for about 79
+ * hours. So about 103 hours, rounded up to five days.
+ */
+export const FREE_AFTER_EXPIRY_MS = 5 * 24 * 60 * 60 * 1000;
+
+/**
+ * Forget links nobody can pay any more: pending or failed, with a session that
+ * expired more than FREE_AFTER_EXPIRY_MS ago. ⛔ A paid, refunded or
+ * needs_review link is never freed, whatever its age, nor one the confirm page
+ * saw paid.
+ */
+export function freeExpiredLinks(now = Date.now()): void {
+  for (const [id, link] of store) {
+    if ((link.status !== "pending" && link.status !== "failed") || link.seenPaid === true) continue;
+    // An unreadable time is NaN, and no comparison with NaN is true: kept.
+    if (Date.parse(link.expiresAt) + FREE_AFTER_EXPIRY_MS < now) store.delete(id);
+  }
+}
+
+/** Room for one more link. Looks for links to free only when the store is full. */
+let lastLook = 0;
 export function hasRoomForLink(): boolean {
+  // At most one look a second: while the store is full of recent links, a look frees nothing.
+  if (store.size >= MAX_LINKS && Date.now() - lastLook >= 1_000) {
+    lastLook = Date.now();
+    freeExpiredLinks();
+  }
   return store.size < MAX_LINKS;
 }
 
