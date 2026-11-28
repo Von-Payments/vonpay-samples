@@ -220,6 +220,21 @@ Rules of thumb:
    the funnel refuses to start with neither. A re-pin of vora.js takes effect
    at the next restart.
 
+   Build the card with `vora.elements.create()`, then
+   `elements.create("card", { style })` and `card.mount(...)`, and submit with
+   `elements.submit()` (`vora.fields` is deprecated). Read the result in this
+   order. `error`: no charge was made by this attempt. `charged`,
+   `chargeStatus` or `recovered: true` present: the checkout already charged,
+   held or started this payment at submit (or cannot say whether money
+   moved), and any `token` on the result was used in that charge, so **never
+   charge it again from your server**. `charged: true` is captured,
+   `"requires_action"` means 3-D Secure first (send the buyer to
+   `redirectUrl`), and `"succeeded"` with `charged: false` is an authorized
+   hold that your server captures. Only a `token` with none of those three
+   fields is a plain token that you charge server-side (guardrail 3).
+   `checkout-embedded` handles every branch and keeps Pay off once a payment
+   is placed.
+
 3. **Charge a saved card / recurring.** On the Node SDK pass
    `paymentMethod: { id: "vp_pmt_*" }` to `paymentIntents.create` (the SDK sends
    `payment_method` on the wire; the Python SDK uses the snake-case name

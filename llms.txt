@@ -30,7 +30,7 @@ assuming. "Current" above is a point-in-time reading.
 - payment-intents-3ds - 3DS / requires_action handling: branch on status, redirect to issuer challenge, confirm terminal state from webhook. → @vonpay/checkout-node
 - saved-cards-mit - Vault a card off-session, anchor a cardholder-initiated charge, then rebill with the mit block (recurring / subscriptions). → @vonpay/checkout-node
 - funnel-one-click-node - One-page funnel: card saved with the shopper's agreement at the order button, first charge from the server, one-click add-on on the same saved card with a one-charge-per-step lock. Express 4, Node 20.6+, vora.js pinned with its integrity hash. → vora.js (CDN) + @vonpay/checkout-node
-- checkout-embedded - Embedded Fields (in-page card fields) via the CDN <script> (vora.js pinned with its integrity hash): collect card in-page, tokenize, charge the vp_pmt_* token server-side. → vora.js (CDN) + @vonpay/checkout-node
+- checkout-embedded - Embedded Fields (in-page card fields) via the CDN <script> (vora.js pinned with its integrity hash): collect the card in-page with vora.elements; on submit, charge the vp_pmt_* token server-side only when the result has no charged, chargeStatus or recovered field (with one, the checkout already charged, held or started the payment at submit: never charge again). → vora.js (CDN) + @vonpay/checkout-node
 - webhooks-node - Webhook receiver: verify signature, idempotent processing, replay-window enforcement, subscription.* handlers (renewal orders, past due, cancel). → @vonpay/checkout-node
 - agent-mcp - Wire @vonpay/checkout-mcp into an MCP-aware runtime (Claude Code, Cursor, Claude Desktop, custom agent). Config-only, no runtime to host. → @vonpay/checkout-mcp
 
@@ -155,6 +155,19 @@ assuming. "Current" above is a point-in-time reading.
    network access to start, but both need a key: checkout-embedded needs its
    secret and publishable keys, and the funnel refuses to start with neither.
    A re-pin takes effect at the next restart.
+   Build the card with vora.elements.create(), then elements.create("card",
+   { style }) and card.mount(...), and submit with elements.submit()
+   (vora.fields is deprecated). Read the result in this order. error: no
+   charge was made by this attempt. charged, chargeStatus or recovered: true
+   present: the checkout already charged, held or started this payment at
+   submit (or cannot say whether money moved), and any token on the result
+   was used in that charge, so NEVER charge it again from your server.
+   charged: true is captured, "requires_action" means 3-D Secure first (send
+   the buyer to redirectUrl), and "succeeded" with charged: false is an
+   authorized hold that your server captures. Only a token with none of those
+   three fields is a plain token that you charge server-side (section 3).
+   checkout-embedded handles every branch and keeps Pay off once a payment
+   is placed.
 
 3. Charging a saved card / recurring.
    Node: pass `paymentMethod: { id: "vp_pmt_*" }` to `paymentIntents.create`
