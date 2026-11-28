@@ -184,10 +184,12 @@ async function main() {
     if (result.chargeStatus === "requires_action") {
       // The bank wants a 3-D Secure check before the charge made at submit can
       // finish. Nothing is charged yet. This sample has no page for the bank
-      // to send the buyer back to, so it does not send the buyer there (a real
-      // integration redirects to result.redirectUrl: see the
-      // elements-custom-checkout sample). Do not offer Pay again: this
-      // checkout already has a payment waiting on that check.
+      // to send the buyer back to, so it does not send the buyer there. A real
+      // integration sends the buyer to result.redirectUrl
+      // (window.location.href = result.redirectUrl) and confirms the outcome
+      // on the charge.* webhook when they return, never on the return alone.
+      // Do not offer Pay again: this checkout already has a payment waiting
+      // on that check.
       showStatus(
         "error",
         "Your bank wants to verify this payment (3-D Secure). This sample cannot complete a bank check, so the payment was not finished. Use a card that needs no check, or see the payment-intents-3ds sample.",

@@ -60,8 +60,9 @@ The handshake:
    and the page never sends it to `/api/charge`:
 
    - `requires_action`: the bank wants a 3-D Secure check. Nothing is charged
-     yet. This sample has no return page, so it stops there (see
-     `elements-custom-checkout` for the redirect).
+     yet. This sample has no return page, so it stops there. A real
+     integration sends the buyer to `result.redirectUrl` and confirms the
+     outcome on the `charge.*` webhook when they return.
    - `succeeded` with `charged: false`: authorized and held (manual capture).
      Your server captures it with `paymentIntentId`. No webhook fires for a
      hold.
