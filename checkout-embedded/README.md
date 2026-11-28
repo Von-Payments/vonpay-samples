@@ -13,8 +13,8 @@ without sending the buyer to a hosted checkout page.
     `https://js.vonpay.com/v1.54.1/vora.js` with its Subresource Integrity
     hash (CDN `<script>` - there is no public npm package to install)
 - **What it demonstrates:** create a session server-side, mount the card
-  iframe in the browser, tokenize on submit, and handle all three submit
-  outcomes (`token` / `charged` / `error`) correctly
+  iframe in the browser with `vora.elements`, submit it, and handle all three
+  submit outcomes (`token` / `charged` / `error`) correctly
 
 ## How it works
 
@@ -45,22 +45,40 @@ The handshake:
    `sessions.create()` with the **secret** key and returns only the session
    `id` (a `vp_cs_*`, safe to expose).
 2. The browser does `new Vora({ publishableKey })`, `vora.sessions.retrieve(id)`,
-   then `vora.fields.create("card").mount("#card-element")`. The card iframe
+   then `const elements = vora.elements.create()` and
+   `elements.create("card", { style }).mount("#card-element")`. The card iframe
    is served by the active card processor and mounted inside your `<div>`.
-3. On submit, `card.tokenize()` resolves to one of three shapes:
+3. On submit, `elements.submit()` resolves to one of three shapes:
 
-   | Result        | Meaning                                              | What this sample does                         |
-   | ------------- | ---------------------------------------------------- | --------------------------------------------- |
-   | `{ error }`   | Nothing was charged                                  | Show the error, re-enable Pay                 |
-   | `{ token }`   | Tokenize-only: you hold a `vp_pmt_*`                 | `POST /api/charge` → server charges the token |
-   | `{ charged }` | Charge-and-save: the embed already charged the buyer | Show success; **does not** charge again       |
+   | Result | Meaning | What this sample does |
+   | --- | --- | --- |
+   | `{ error }` | No charge was made by this attempt | Show the error, re-enable Pay (a decline that ended the checkout keeps Pay off) |
+   | `{ token }` with no `chargeStatus` | Tokenize-only: you hold a `vp_pmt_*` | `POST /api/charge` → server charges the token |
+   | `{ charged: true }` | Charge-and-save: the embed already charged the buyer | Show success; **does not** charge again |
+
+   A result that carries a `chargeStatus` was placed by the embed at submit,
+   and the page never sends it to `/api/charge`:
+
+   - `requires_action`: the bank wants a 3-D Secure check. Nothing is charged
+     yet. This sample has no return page, so it stops there. A real
+     integration sends the buyer to `result.redirectUrl` and confirms the
+     outcome on the `charge.*` webhook when they return.
+   - `succeeded` with `charged: false`: authorized and held (manual capture).
+     Your server captures it with `paymentIntentId`. No webhook fires for a
+     hold.
+   - anything else (`pending`, or no `charged` answer): the outcome comes on
+     the webhook. Do not charge again.
+
+   Once a payment is placed, Pay stays off for that checkout, even if the
+   buyer edits the card.
 
 > **Why the result is branched.** On a charge-and-save session the embed
 > charges the card *during submit*. If you also called `POST /api/charge`
 > (i.e. `paymentIntents.create`) for that session, you would charge the
 > buyer twice. This sample only charges server-side when the result is a
-> `token`. Which flow a session uses is decided by your checkout
-> configuration; the result shape tells you which one ran.
+> `token` with no `chargeStatus` (any token on a result with a `chargeStatus`
+> was already used in that charge). Which flow a session uses is decided by
+> your checkout configuration; the result shape tells you which one ran.
 
 **The server charges each checkout at most once.** `POST /api/create-session`
 records the checkout on the server and sets an httpOnly cookie naming it, so a

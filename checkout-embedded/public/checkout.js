@@ -8,13 +8,22 @@
  *      from the CDN <script> in index.html.
  *   4. `vora.sessions.retrieve(sessionId)` — loads the session + the right
  *      card binder for this merchant.
- *   5. `vora.fields.create("card")` + `card.mount(...)` — renders the card
- *      iframe. The mount handle emits "ready" / "change" events.
- *   6. On submit, `card.tokenize()` resolves to a three-way result:
+ *   5. `vora.elements.create()` → `elements.create("card", { style })` +
+ *      `card.mount(...)` — renders the card iframe. The card emits "ready" /
+ *      "change" events.
+ *   6. On submit, `elements.submit()` resolves to a three-way result:
  *        - { error }   → nothing was charged; show the error, let them retry.
  *        - { token }   → tokenize-only flow; charge the token server-side.
+ *                        Only when the result has NO `chargeStatus`.
  *        - { charged } → charge-and-save flow; the embed already charged.
  *                        Do NOT charge again — that would double-charge.
+ *      A result WITH a `chargeStatus` means the embed already charged, held
+ *      or started this payment at submit (its token, if any, was used):
+ *      never charge it again from the server. It is one of: waiting on a
+ *      3-D Secure check (`requires_action`), authorized and held
+ *      (`succeeded` + `charged: false`; your server captures it), or still
+ *      settling / not confirmed (wait for the webhook).
+ *      After any payment is placed, Pay stays off for this checkout.
  *
  * The client result is a UX signal only. Confirm settlement server-side
  * via the Von Payments webhook before fulfilling the order.
@@ -84,9 +93,10 @@ async function main() {
     return;
   }
 
-  // 5. Create + mount the card field. mount() returns a handle that emits
-  //    "ready" / "change" events; tokenize() lives on the field itself.
-  const card = vora.fields.create("card", {
+  // 5. Create the elements collection, then the card in it, and mount it.
+  //    The card emits "ready" / "change" events; the collection submits it.
+  const elements = vora.elements.create();
+  const card = elements.create("card", {
     style: {
       font: { family: "system-ui, sans-serif", size: "16px" },
       color: { text: "#1f2937", placeholder: "#9ca3af" },
@@ -95,32 +105,44 @@ async function main() {
     placeholder: { number: "1234 1234 1234 1234" },
   });
 
-  let mounted;
   try {
-    mounted = card.mount("#card-element");
+    card.mount("#card-element");
   } catch (err) {
     showStatus("error", `Could not mount the card field: ${escapeHtml(readError(err))}`);
     return;
   }
 
+  // Once a payment is placed (charged, held, waiting on the bank, or of
+  // unknown outcome), Pay stays off for this checkout. `locked` makes the card's
+  // "ready" / "change" events unable to turn it back on: a buyer who edits the
+  // still-mounted card after a terminal result must not get a second submit.
+  // Only resetButton() (a result where nothing was charged) clears it.
+  let locked = false;
+  function lockPay(text) {
+    locked = true;
+    payButton.disabled = true;
+    payButton.textContent = text;
+  }
+
   // Enable Pay once the field is ready; gate it on validity as they type.
-  mounted.on("ready", () => {
-    payButton.disabled = false;
+  card.on("ready", () => {
+    if (!locked) payButton.disabled = false;
   });
-  mounted.on("change", (event) => {
-    payButton.disabled = !event.complete;
+  card.on("change", (event) => {
+    if (!locked) payButton.disabled = !event.complete;
   });
 
-  // 6. Submit → tokenize → branch the three-way result.
+  // 6. Submit → branch the three-way result.
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (locked) return;
     payButton.disabled = true;
     payButton.textContent = "Processing…";
     clearStatus();
 
     let result;
     try {
-      result = await card.tokenize();
+      result = await elements.submit();
     } catch (err) {
       // The SDK normally returns errors as result.error; this guards the
       // rare path where it throws instead.
@@ -129,19 +151,81 @@ async function main() {
       return;
     }
 
-    // Discriminate in order: error → token → charged.
+    // Discriminate in order: error → already charged at submit → token.
     if (result.error) {
-      // Nothing was charged. Show the error and let the buyer retry.
+      // No charge was made by this attempt.
+      const finished = result.error.code === "frame_payment_declined" && result.error.retryable === false;
       showStatus(
         "error",
-        `Payment failed (${escapeHtml(result.error.code)}): ${escapeHtml(result.error.message)}`,
+        `Payment failed (${escapeHtml(result.error.code)}): ${escapeHtml(result.error.message)}${finished ? " This checkout cannot take another payment." : ""}`,
       );
+      if (finished) {
+        // A decline that ended the session: the SDK refuses a resubmit, so do
+        // not offer Pay again. A real shop starts a new checkout for its order.
+        lockPay("Checkout ended");
+        return;
+      }
       resetButton();
       return;
     }
 
+    if (result.charged === true) {
+      // Charge-and-save flow: the embed already charged the buyer on submit.
+      // A token may come back too (the card was also saved). Do NOT call
+      // /api/charge — that would charge them a second time.
+      showStatus(
+        "pending",
+        `Charge submitted${result.last4 ? ` on ${escapeHtml(brandLine(result))}` : ""}. The card was charged during submit; confirm settlement via the webhook before fulfilling the order.`,
+      );
+      lockPay("Submitted");
+      return;
+    }
+
+    if (result.chargeStatus === "requires_action") {
+      // The bank wants a 3-D Secure check before the charge made at submit can
+      // finish. Nothing is charged yet. This sample has no page for the bank
+      // to send the buyer back to, so it does not send the buyer there. A real
+      // integration sends the buyer to result.redirectUrl
+      // (window.location.href = result.redirectUrl) and confirms the outcome
+      // on the charge.* webhook when they return, never on the return alone.
+      // Do not offer Pay again: this checkout already has a payment waiting
+      // on that check.
+      showStatus(
+        "error",
+        "Your bank wants to verify this payment (3-D Secure). This sample cannot complete a bank check, so the payment was not finished. Use a card that needs no check, or see the payment-intents-3ds sample.",
+      );
+      lockPay("Bank check needed");
+      return;
+    }
+
+    if (result.chargeStatus === "succeeded" && result.charged === false) {
+      // AUTHORIZED AND HELD (a session created with captureMethod: "manual").
+      // The funds are reserved on the card; nothing is taken until YOUR server
+      // captures the payment intent. No webhook fires for a hold: this result
+      // is the signal. Before capturing, read the payment intent with your
+      // secret key and check its metadata.session_id is this checkout's
+      // session (the id came through the buyer's browser). Capture promptly:
+      // a hold lapses after about 7 days. Any token here was used in the hold.
+      showStatus(
+        "success",
+        `Payment authorized${result.last4 ? ` on ${escapeHtml(brandLine(result))}` : ""} and held${result.paymentIntentId ? ` (payment intent <code>${escapeHtml(result.paymentIntentId)}</code>)` : ""}. Nothing is taken until the shop captures it.`,
+      );
+      lockPay("Authorized");
+      return;
+    }
+
+    if (result.chargeStatus !== undefined || result.charged !== undefined || result.recovered === true) {
+      // The embed charged at submit and the payment is still settling, or the
+      // SDK has no yes / no on whether money moved. Any token on this result
+      // was already used in that charge. Never charge it again; the webhook
+      // (or a server-side read) has the outcome.
+      showUnknownOutcome();
+      return;
+    }
+
     if (result.token) {
-      // Tokenize-only flow: we hold a vp_pmt_* token. Charge it server-side.
+      // Tokenize-only flow: we hold a vp_pmt_* token and no charge has run.
+      // Charge it server-side.
       try {
         const res = await fetch("/api/charge", {
           method: "POST",
@@ -176,15 +260,14 @@ async function main() {
             "error",
             "Your bank wants to verify this payment (3-D Secure). This sample cannot complete a bank check, so the payment was not finished. Use a card that needs no check, or see the payment-intents-3ds sample.",
           );
-          payButton.disabled = true;
-          payButton.textContent = "Bank check needed";
+          lockPay("Bank check needed");
           return;
         }
         showStatus(
           body.outcome === "paid" ? "success" : "pending",
           `Payment on ${escapeHtml(brandLine(result))}: <strong>${escapeHtml(body.outcome)}</strong> (payment intent <code>${escapeHtml(body.intent_id)}</code>).<br />Confirm settlement via the webhook before fulfilling the order.`,
         );
-        payButton.textContent = "Submitted";
+        lockPay("Submitted");
       } catch (err) {
         // The request or its answer was lost on the way. The server may have
         // charged the card, so do not offer Pay again on this page.
@@ -194,37 +277,28 @@ async function main() {
       return;
     }
 
-    if (result.charged) {
-      // Charge-and-save flow: the embed already charged the buyer on submit.
-      // Do NOT call /api/charge — that would charge them a second time.
-      showStatus(
-        "pending",
-        `Charge submitted${result.last4 ? ` on ${escapeHtml(brandLine(result))}` : ""}. The card was charged during submit; confirm settlement via the webhook before fulfilling the order.`,
-      );
-      payButton.textContent = "Submitted";
-      return;
-    }
-
-    // Defensive: a result with none of error/token/charged is a contract
-    // violation we should surface rather than silently swallow.
-    showStatus("error", "Unexpected empty result from tokenize(). See the console.");
-    console.error("tokenize() returned an unrecognized shape:", result);
-    resetButton();
+    // Defensive: anything else (a shape this page does not know, or a
+    // card-update `status: "card_collected"` result, which this sample's
+    // sessions never produce) is surfaced, and Pay stays off: an unknown
+    // shape could be a payment.
+    showStatus("error", "Unexpected result from submit(). Check the payment in your dashboard before trying again. See the console.");
+    console.error("elements.submit() returned an unrecognized shape:", result);
+    lockPay("Check the dashboard");
   });
 
   function resetButton() {
+    locked = false;
     payButton.disabled = false;
     payButton.textContent = `Pay ${formatAmount(config.amount, config.currency)}`;
   }
-}
 
-function showUnknownOutcome() {
-  showStatus(
-    "pending",
-    "We could not confirm whether this payment went through. Please do not pay again. The webhook (or your dashboard) has the result.",
-  );
-  payButton.disabled = true;
-  payButton.textContent = "Result pending";
+  function showUnknownOutcome() {
+    showStatus(
+      "pending",
+      "We could not confirm whether this payment went through. Please do not pay again. The webhook (or your dashboard) has the result.",
+    );
+    lockPay("Result pending");
+  }
 }
 
 function brandLine(result) {
@@ -313,7 +387,8 @@ function escapeHtml(value) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 main();
